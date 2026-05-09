@@ -5,8 +5,8 @@ repository, oriented around the claims in the paper.
 
 ## Where to start
 
-1. **Read** `paper/pluralistic_ICML2026.pdf` (the compiled submission, 15 pp:
-   8 pp body + refs + appendix).
+1. **Read** the compiled submission PDF on the workshop's OpenReview page
+   (15 pp: 8 pp body + refs + appendix).
 2. **Skim** the appendix in the same PDF for proofs (Appendix A) and dataset
    cards (Appendix D).
 3. If you want to see code behind a specific claim, use the table below.
@@ -35,12 +35,6 @@ repository, oriented around the claims in the paper.
 | §3.9 | Verbosity null | `scripts/calibration/eval_user_score_mse_shrunk.py` (`--verbosity-null`) |
 | Appendix A (proof) | Theorem 1 stated; proof in PDF | `scripts/q5_halpern_plus_pilsd_pipeline.py` (numerical check) |
 | Falsifiability suite | F1 to F4 internal nulls | `scripts/falsifiers/F1_…F4_…py` |
-| Fig 1 (PEBS overview) | n/a | `paper/figures/fig1_pebs_overview.py` |
-| Fig 2 (omega schematic) | n/a | `paper/figures/fig2_eb_shrinkage_omega.py` |
-| Fig 3 (cross-base verdict matrix) | n/a | `paper/figures/fig3_f23_cross_base_verdict_matrix.py` |
-| Fig 7 (per-user heterogeneity) | n/a | `paper/figures/fig7_per_user_heterogeneity.py` |
-| Fig 8 (head-collapse signature) | n/a | `paper/figures/fig8_head_collapse_signature.py` |
-| Fig phase-h forest (cross-corpus) | n/a | `paper/figures/fig_phase_h_forest.py` |
 
 ## Hardware / data requirements
 
@@ -56,7 +50,7 @@ seconds to minutes on a laptop. The only GPU-bound code is:
   pre-scored RM outputs (parquet); the fit step itself is CPU.
 
 PRISM, PluriHarms, HelpSteer2, MultiPref, and OASST2 are not redistributed
-here. Obtain them from the original sources (see `paper/references.bib`).
+here. Obtain them from the original sources (see paper bibliography).
 
 ## Naming note
 

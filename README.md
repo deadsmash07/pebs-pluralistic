@@ -8,15 +8,10 @@ anonymous.4open.science mirror.
 
 ## Repository layout
 
-```
-paper/                                 LaTeX submission package + figure source
-├── pluralistic_ICML2026.tex
-├── pluralistic_ICML2026.pdf           compiled paper (15 pp; body 8/8)
-├── references.bib
-├── icml2026.sty / .bst                official ICML 2026 template
-├── algorithm.sty / algorithmic.sty / fancyhdr.sty
-└── figures/                           9 figure PDFs + matplotlib source
+This is a code-only release. The compiled paper is hosted on the workshop's
+OpenReview page.
 
+```
 scripts/                               experiment code referenced in the paper
 ├── q1_helpsteer2_replication.py       §3.4 cross-corpus replication on HelpSteer2
 ├── q2_f23_mistral_multiseed.py        §3.5 F23 Mistral cross-base panel
@@ -66,7 +61,7 @@ scripts/                               experiment code referenced in the paper
 │   ├── build_oasst1_author_cohort.py / build_oasst2_multiaxis_cohort.py
 │   ├── build_shp_cohort.py
 │   └── build_author_trajectory_cohort.py
-└── plots/                             standalone plotting (paper/figures has main 9)
+└── plots/                             standalone plotting
 ```
 
 **135 Python files total**: 14 top-level (q-suite + wave_a) plus 36 analysis,
@@ -99,7 +94,7 @@ pip install torch transformers datasets trl peft accelerate \
 
 ### Data
 PRISM, PluriHarms, HelpSteer2, MultiPref, and OASST2 are not redistributed
-here. Obtain them from the original sources cited in `paper/references.bib`.
+here. Obtain them from the original sources cited in the paper bibliography.
 
 ### Expected paths
 
