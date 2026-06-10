@@ -1,5 +1,9 @@
 # PEBS: Per-rater Empirical-Bayes Shrinkage for RLHF Reward-Model Calibration
 
+<p align="center">
+  <img src="assets/pebs_poster.png" alt="PEBS method overview: annotators rate on different scales; per-rater OLS calibrators; empirical-Bayes shrinkage toward the population mean; calibrated per-rater scores. Headline results: −8.58% within-user RMSE on PRISM, +9.66% PluriHarms replication, cold-start break-even at 5 ratings per user." width="100%">
+</p>
+
 Code release for the paper **"PEBS: Per-rater Empirical-Bayes Shrinkage for
 RLHF Reward-Model Calibration"**, accepted at the **Pluralistic Alignment
 Workshop @ ICML 2026** (Seoul, South Korea).
