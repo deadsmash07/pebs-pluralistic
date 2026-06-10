@@ -1,6 +1,6 @@
 """F2 — RM-signal-ablation baseline.
 
-Pre-registered (iter+N+290) falsifier for the claim that PILSD's +8.58%
+Pre-registered falsifier for the claim that PEBS's +8.58%
 gain on PRISM is driven by RM-signal-informed slope inference (not
 exclusively by intercept shrinkage per the 1973 Efron-Morris baseline).
 
@@ -12,10 +12,10 @@ Replace the rm_score column with THREE null variants:
     (ii)  iid N(0, 1) calibrated to match the empirical rm_score sd
     (iii) global random permutation of rm_score across ALL rows
 
-Re-run PILSD (same LOCO-conversation hold-out as neighbor_head_to_head.py)
+Re-run PEBS (same LOCO-conversation hold-out as neighbor_head_to_head.py)
 and measure RMSE gain vs pop-slope.
 
-Pre-registered criterion (iter+N+290):
+Pre-registered criterion:
   CONFIRMING:  each variant returns gain <= 6.5 pp
                (consistent with the Efron-Morris intercept-only +6.04% ceiling
                 documented in PAPER_INSERT_pythia_stress.tex at r ~ 0)
@@ -24,7 +24,7 @@ Pre-registered criterion (iter+N+290):
 
 Outputs
 -------
-results/falsifiers_iter290/F2_rm_signal_ablation.json
+results/falsifiers/F2_rm_signal_ablation.json
 """
 from __future__ import annotations
 
@@ -39,7 +39,7 @@ from tqdm import tqdm
 ROOT = Path(__file__).resolve().parents[2]
 T1 = ROOT.parent / "1_Causal_RLHF"
 SCORED = T1 / "data/prism_rm_scored.parquet"
-OUT = ROOT / "results/falsifiers_iter290"
+OUT = ROOT / "results/falsifiers"
 
 MIN_CONV_PER_USER = 2
 MIN_UTT_PER_USER = 10
@@ -66,7 +66,7 @@ def fit_ols_with_se(x, y):
     return alpha, beta, se_alpha, se_beta
 
 
-def method_pilsd_shrunk(x_tr, y_tr, x_te, alpha_pop, beta_pop, tau2_a, tau2_b):
+def method_pebs_shrunk(x_tr, y_tr, x_te, alpha_pop, beta_pop, tau2_a, tau2_b):
     a, b, se_a, se_b = fit_ols_with_se(x_tr, y_tr)
     if not np.isfinite(a):
         return alpha_pop + beta_pop * x_te
@@ -77,8 +77,8 @@ def method_pilsd_shrunk(x_tr, y_tr, x_te, alpha_pop, beta_pop, tau2_a, tau2_b):
     return a_s + b_s * x_te
 
 
-def evaluate_pilsd(df: pd.DataFrame, label: str):
-    """Full PILSD LOCO pipeline. df columns: user_id, conversation_id, rm_score, score_user."""
+def evaluate_pebs(df: pd.DataFrame, label: str):
+    """Full PEBS LOCO pipeline. df columns: user_id, conversation_id, rm_score, score_user."""
     slope_pop, intercept_pop = np.polyfit(df["rm_score"].to_numpy(),
                                           df["score_user"].to_numpy().astype(float), 1)
     alpha_pop, beta_pop = float(intercept_pop), float(slope_pop)
@@ -103,7 +103,7 @@ def evaluate_pilsd(df: pd.DataFrame, label: str):
         conv_ids = g["conversation_id"].unique().tolist()
         if len(conv_ids) < MIN_CONV_PER_USER:
             continue
-        sq_pop, sq_pilsd = [], []
+        sq_pop, sq_pebs = [], []
         n_utt_used = 0
         for hc in conv_ids:
             tr = g[g["conversation_id"] != hc]
@@ -115,20 +115,20 @@ def evaluate_pilsd(df: pd.DataFrame, label: str):
             x_te = te["rm_score"].to_numpy(dtype=np.float64)
             y_te = te["score_user"].to_numpy(dtype=np.float64)
             pred_pop = alpha_pop + beta_pop * x_te
-            pred_pilsd = method_pilsd_shrunk(x_tr, y_tr, x_te,
+            pred_pebs = method_pebs_shrunk(x_tr, y_tr, x_te,
                                               alpha_pop, beta_pop, tau2_a, tau2_b)
             sq_pop.extend(((pred_pop - y_te) ** 2).tolist())
-            sq_pilsd.extend(((pred_pilsd - y_te) ** 2).tolist())
+            sq_pebs.extend(((pred_pebs - y_te) ** 2).tolist())
             n_utt_used += len(y_te)
         if n_utt_used < MIN_UTT_PER_USER:
             continue
         per_user.append({
             "user_id": uid, "n_utt": n_utt_used,
             "rmse_pop": float(np.sqrt(np.mean(sq_pop))),
-            "rmse_pilsd": float(np.sqrt(np.mean(sq_pilsd))),
+            "rmse_pebs": float(np.sqrt(np.mean(sq_pebs))),
         })
     pu = pd.DataFrame(per_user)
-    pu["gain_pct"] = 100.0 * (pu["rmse_pop"] - pu["rmse_pilsd"]) / pu["rmse_pop"]
+    pu["gain_pct"] = 100.0 * (pu["rmse_pop"] - pu["rmse_pebs"]) / pu["rmse_pop"]
 
     rng = np.random.default_rng(RNG_BASE)
     g_vals = pu["gain_pct"].to_numpy()
@@ -145,7 +145,7 @@ def evaluate_pilsd(df: pd.DataFrame, label: str):
         "tau2_b": tau2_b,
         "abs_r_pearson": abs(r_obs),
         "rmse_pop_mean": float(pu["rmse_pop"].mean()),
-        "rmse_pilsd_mean": float(pu["rmse_pilsd"].mean()),
+        "rmse_pebs_mean": float(pu["rmse_pebs"].mean()),
         "gain_pct_mean": float(g_vals.mean()),
         "gain_pct_ci95": [float(lo), float(hi)],
     }
@@ -168,28 +168,28 @@ def main():
 
     # Reference: real RM signal
     print("\n[REFERENCE] real Qwen-7B rm_score")
-    results["real_rm"] = evaluate_pilsd(df, label="real_rm")
+    results["real_rm"] = evaluate_pebs(df, label="real_rm")
 
     # Variant (i): iid N(0, 1)
     print("\n[VARIANT i] iid N(0,1) null RM")
     rng = np.random.default_rng(RNG_BASE + 1)
     df_null1 = df.copy()
     df_null1["rm_score"] = rng.normal(0.0, 1.0, len(df_null1))
-    results["null_n01"] = evaluate_pilsd(df_null1, label="null_n01")
+    results["null_n01"] = evaluate_pebs(df_null1, label="null_n01")
 
     # Variant (ii): iid N(0, sd_rm)
     print("\n[VARIANT ii] iid N(0, sd_rm) null RM")
     rng = np.random.default_rng(RNG_BASE + 2)
     df_null2 = df.copy()
     df_null2["rm_score"] = rng.normal(0.0, sd_rm, len(df_null2))
-    results["null_n0sdrm"] = evaluate_pilsd(df_null2, label="null_n0sdrm")
+    results["null_n0sdrm"] = evaluate_pebs(df_null2, label="null_n0sdrm")
 
     # Variant (iii): random permutation
     print("\n[VARIANT iii] permuted rm_score")
     rng = np.random.default_rng(RNG_BASE + 3)
     df_null3 = df.copy()
     df_null3["rm_score"] = rng.permutation(df["rm_score"].to_numpy())
-    results["null_permuted"] = evaluate_pilsd(df_null3, label="null_permuted")
+    results["null_permuted"] = evaluate_pebs(df_null3, label="null_permuted")
 
     # Pre-registered threshold: each null variant's gain must be <= 6.5 pp
     threshold = 6.5

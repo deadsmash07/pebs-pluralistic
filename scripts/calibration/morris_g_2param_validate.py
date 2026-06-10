@@ -1,6 +1,6 @@
-"""iter+N+270 — Two-parameter Morris g-function closed-form validation.
+"""Two-parameter Morris g-function closed-form validation.
 
-Extends iter+N+265's one-way g(r) = r/(1+r) risk-gap theorem to the PILSD
+Extends the one-way g(r) = r/(1+r) risk-gap theorem (morris_g_validate.py) to the PEBS
 two-parameter random-effects model
     s_ji = alpha_j + beta_j * x_ji + eps_ji,
     alpha_j ~ N(mu_alpha, tau_alpha^2),  beta_j ~ N(mu_beta, tau_beta^2),
@@ -11,7 +11,7 @@ Theorem T3 (two-parameter Morris g)
 Let
     r_alpha_j = n_j * tau_alpha^2 / sigma_eps^2
     r_beta_j  = n_j * tau_beta^2  * Var_within(x_j) / sigma_eps^2
-    g(r) = r / (1 + r)   (same concave form from iter+N+265).
+    g(r) = r / (1 + r)   (same concave form as the one-parameter validation).
 
 Under i.i.d. Gaussian REs with *within-user-centered* design
 (equivalently, per-user OLS uses the local x-mean \bar x_j as origin),
@@ -32,7 +32,7 @@ Proof sketch
   The EB posterior mean is alpha_hat^EB = omega_alpha_j * alpha_hat_j
   + (1-omega_alpha_j) * mu_alpha (similarly for beta), with
   omega_alpha_j = r_alpha_j / (1 + r_alpha_j) (James-Stein).
-* Risk(alpha_hat^EB | alpha_j) = tau_alpha^2 / (1 + r_alpha_j) (iter+N+265 Lemma).
+* Risk(alpha_hat^EB | alpha_j) = tau_alpha^2 / (1 + r_alpha_j) (one-parameter Lemma).
 * Risk(beta_hat^EB  | beta_j)  = tau_beta^2  / (1 + r_beta_j).
 * POP risks are tau_alpha^2 and tau_beta^2.
 * Summing with the x^2-weighting on the beta component and subtracting
@@ -52,9 +52,9 @@ For each of PRISM / PluriHarms / MultiPref:
          dMSE = tau_alpha^2 * mean(g(r_alpha))  +  tau_beta^2 * rmbar2 * mean(g(r_beta))
      with n_j-weighted means.
   6. Predicted corpus-level RMSE vs POP: MSE_POP_empirical from the
-     POP-predictor (already in iter+N+265 fit), MSE_EB = MSE_POP_empirical - dMSE,
+     POP-predictor (already in the one-parameter fit), MSE_EB = MSE_POP_empirical - dMSE,
      rel_imp = 1 - sqrt(MSE_EB / MSE_POP).
-  7. Compare to observed PILSD gain.
+  7. Compare to observed PEBS gain.
 
 Also report the 1-parameter prediction for reference.
 
@@ -190,7 +190,7 @@ def fit_two_param(df: pd.DataFrame, y_col: str, x_col: str,
     # the user's own xbar_j). For PREDICTION at a new global x = x0 the total
     # risk is what we decompose below with the rmbar2 weighting.
     #
-    # For consistency with iter+N+260 (which reports tau_alpha^2 at global zero
+    # For consistency with the 4-estimator summary (which reports tau_alpha^2 at global zero
     # via MoM on alpha_hat_j with SE^2 = mse*(1/n + xbar^2/Sxx)), also compute:
     alpha_global = ru["alpha_j_global"].to_numpy()
     se_alpha_global_sq = se_a_sq + (ru["xbar_j"].to_numpy() ** 2) * se_b_sq
@@ -231,7 +231,7 @@ def predict_2param(fit: dict) -> dict:
              This corresponds to prediction-risk at the USER'S OWN x-distribution,
              which matches leave-one-row-out CV within-user.
 
-    The CV RMSE metric in the published PILSD gains evaluates held-out rows at
+    The CV RMSE metric in the published PEBS gains evaluates held-out rows at
     the user's own x-distribution, so the within-centered form is the right
     comparator for published %-gain numbers. We report both.
     """
@@ -256,7 +256,7 @@ def predict_2param(fit: dict) -> dict:
     dMSE_beta_global = tau_b * rmbar2 * float((weights * g_beta).sum())
     dMSE_beta_withinx = tau_b * float((weights * varx_within_j * g_beta).sum())
 
-    # MAIN (within-user CV evaluation — matches PILSD reported RMSE):
+    # MAIN (within-user CV evaluation — matches PEBS reported RMSE):
     dMSE_2param_CV = dMSE_alpha + dMSE_beta_withinx
     # Alternative (global x-distribution):
     dMSE_2param_global = dMSE_alpha + dMSE_beta_global
@@ -269,7 +269,7 @@ def predict_2param(fit: dict) -> dict:
         return 1.0 - float(np.sqrt(mse_eb / mse_pop)), False
 
     def _rel_imp_ratio(dmse_alpha, dmse_beta_cv):
-        """Ratio form (iter+N+265 style):
+        """Ratio form (one-parameter style):
           MSE_EB_j  = tau_a/(1+r_a_j) + varx_within_j * tau_b/(1+r_b_j) + sigma^2
           rel_imp = 1 - sqrt( mean_j(n_j * MSE_EB_j / sum_n) / mse_pop ).
         More stable when MoM over-estimates tau (MultiPref case).
@@ -293,7 +293,7 @@ def predict_2param(fit: dict) -> dict:
     g_alpha_1p = g(r_alpha_1p)
     dMSE_1param = tau_a_glob * float((weights * g_alpha_1p).sum())
     ri_1p, clip_1p = _rel_imp(dMSE_1param)
-    # 1-parameter RATIO form (iter+N+265 baseline reproduction):
+    # 1-parameter RATIO form (baseline reproduction):
     mse_eb_1p_j = tau_a_glob / (1.0 + r_alpha_1p) + sigma2
     mse_eb_1p_w = float((weights * mse_eb_1p_j).sum())
     ri_1p_ratio = (1.0 - float(np.sqrt(mse_eb_1p_w / mse_pop))
@@ -353,7 +353,7 @@ def parse_args():
     p.add_argument("--prism-parquet", default="data/prism_rm_scored.parquet")
     p.add_argument("--pluriharms-parquet", default="data/pluriharms_long.parquet")
     p.add_argument("--multipref-parquet",
-                   default="../3_PILSD_Standalone/data/multipref_evaluator_quality.parquet")
+                   default="../3_PEBS_Standalone/data/multipref_evaluator_quality.parquet")
     p.add_argument("--output-dir", default="results/track1_morris_g_2param_validate")
     return p.parse_args()
 
@@ -384,7 +384,7 @@ def main():
             corpora[name] = {
                 "fit": fit_summary,
                 "predicted": pred,
-                "observed_pilsd_gain_pct": observed[name],
+                "observed_pebs_gain_pct": observed[name],
             }
         except Exception as e:
             corpora[name] = {"error": str(e)}
@@ -400,7 +400,7 @@ def main():
         pred_2p_cv = p["rel_imp_pct_2param"]
         pred_2p_g = p["rel_imp_pct_2param_global_x"]
         pred_1p = p["rel_imp_pct_1param_ref"]
-        obs = rec["observed_pilsd_gain_pct"]
+        obs = rec["observed_pebs_gain_pct"]
         def _round_or_nan(v, d):
             return None if v is None or (isinstance(v, float) and np.isnan(v)) else round(v, d)
         def _delta(v, o):
@@ -457,7 +457,6 @@ def main():
     within_2pp_2p = sum(1 for r in table if _abs_le(r, "abs_delta_2p_cv_pp", 2.0))
 
     out = {
-        "iter": "iter+N+270",
         "theorem": (
             "Two-parameter Morris g: E[POP-risk - EB-risk] = "
             "tau_alpha^2 * g(r_alpha) + tau_beta^2 * E[x^2] * g(r_beta), "

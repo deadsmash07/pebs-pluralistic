@@ -1,4 +1,4 @@
-"""RandomForest R² predicting per-user PILSD calibrators (α_j, β_j) from PRISM demographics.
+"""RandomForest R² predicting per-user PEBS calibrators (α_j, β_j) from PRISM demographics.
 
 Reviewer W5 ask: the paper reports ANOVA η²≤0.018 for each demographic
 individually (only gender→β_j survives Bonferroni), which is evidence

@@ -1,8 +1,8 @@
 """PReF (Shenfeld, Faltings, Agrawal, Pacchiano 2025, arXiv:2503.06358) head-to-head
 on PRISM LOCO slice -- faithful re-implementation of Eqs. (3)-(5) adapted to the
-PILSD apples-to-apples regime (per-user RMSE on scalar ratings).
+PEBS apples-to-apples regime (per-user RMSE on scalar ratings).
 
-Reference (verified 2026-05-02 via WebFetch + Skill: paper-citation-integrity-audit):
+Reference (verified against the published paper):
     "Language Model Personalization via Reward Factorization."
     Idan Shenfeld*, Felix Faltings*, Pulkit Agrawal, Aldo Pacchiano.
     arXiv:2503.06358v1, 8 Mar 2025.
@@ -27,13 +27,11 @@ PReF's published method (paper Sections 3-4.1; Algorithm 1):
          pairs, the user lambda is found by L2-regularised logistic regression
          with phi held fixed -- a plain concave problem.
 
-Apples-to-apples regime per Skill: research-grade-code-audit-pre-launch G2/G5
-(audit cross-checked against memory/apples_to_apples_baselines_research_2026_05_02.md
-top-1 candidate row + memory/baselines_apples_to_apples_audit_2026_05_02.md):
+Apples-to-apples regime:
     +  PReF's NATIVE OUTPUT is a per-response scalar reward r_i(x, y) in R.
        Even though training uses BT pairwise loss, the OUTPUT layer feeds
        directly into RMSE comparison with PRISM's scalar score_user labels --
-       same axis as PILSD's (alpha_j + beta_j * rm_score) calibrator.
+       same axis as PEBS's (alpha_j + beta_j * rm_score) calibrator.
     +  Same PRISM split as P-GenRM head-to-head (LOCO on conversation; same
        MIN_CONV_PER_USER, MIN_UTT_PER_USER). Same seed (20260420).
     +  Same backbone embedding (rm_score; pre-extracted by Qwen2.5-7B-Instruct
@@ -50,7 +48,7 @@ Why we re-implement instead of running idanshen/PReF_code as-is:
     LLM-as-judge cross-user labels would (a) break apples-to-apples on the
     same PRISM-native split as P-GenRM/Halpern/ICRM/SPL re-implementations,
     and (b) inject a known LLM-as-judge bias into PReF's lambda's that does
-    not affect PILSD or other baselines.  Instead we construct *intra-user*
+    not affect PEBS or other baselines.  Instead we construct *intra-user*
     pairwise preferences from each user's own scalar ratings: for two
     utterances (u_a, u_b) of user i, A_n = 1 iff score_user(u_a) > score_user(u_b)
     (with ties dropped) -- this preserves PReF's BT-MLE training contract
@@ -98,7 +96,7 @@ Adaptation choices (faithful to PReF; transparent about substitutions):
        pairs (rm_score, score_user) and maps the pairwise-MLE scalar back
        onto the scoring scale.  This step is honestly disclosed: PReF's
        reward function is BT-trained -> only the *difference* of rewards
-       has a calibrated probability interpretation.  To compare to PILSD's
+       has a calibrated probability interpretation.  To compare to PEBS's
        absolute-rating prediction we must un-shift the BT scale; we use
        the same monotone-affine recalibration that P-GenRM internally uses
        (no information leakage; (a_calib, b_calib) is fit on the SAME
@@ -111,7 +109,7 @@ Adaptation choices (faithful to PReF; transparent about substitutions):
            pref_no_svd      -- J=3 with random init (paper Sec. 5.5 ablation)
            pref_no_l2       -- J=3 with beta=0 (paper Sec. 5.5 ablation)
 
-Honest scope caveats baked into the script (cited Skill: honest-disclosure §1):
+Honest scope caveats baked into the script:
     1. PReF is a JOINT (Phi, Lambda) learner; we freeze Phi at the polynomial
        basis to preserve apples-to-apples upstream signal across all PRISM
        baselines.  This DEFEATS PReF's "scale dataset + larger model improves
@@ -131,24 +129,20 @@ Honest scope caveats baked into the script (cited Skill: honest-disclosure §1):
        trained for RMSE.  Honest framing: PReF's NATIVE OUTPUT is a scalar
        (lambda^T phi), so RMSE-on-scalar is fair; but PReF's training does
        not directly minimise RMSE.  This caveat is the same as the
-       Halpern/ICRM/SPL "off-axis" caveat -- PReF is EDGE apples-to-apples
-       per memory/apples_to_apples_baselines_research_2026_05_02.md §3.
+       Halpern/ICRM/SPL "off-axis" caveat -- PReF is edge apples-to-apples.
     5. We do not apply the inference-time-alignment of paper Sec. 4 step (iii)
        because we are comparing reward functions, not policy outputs.
 
-Outputs (mirroring scripts/baselines/p_genrm_2026_on_prism.py G9 schema):
+Outputs (mirroring scripts/baselines/p_genrm_2026_on_prism.py schema):
     results/track1_pref_h2h/summary.json      <- methods.{pref_J2_full, ...,
-                                                  pilsd_shrunk, pop_slope}
+                                                  pebs_shrunk, pop_slope}
     results/track1_pref_h2h/per_user.parquet  <- per-user RMSE rows
     paper/tables/pref_headtohead_numbers.tex  <- LaTeX table (NOT auto-included
                                                   in any .tex; user-decision
-                                                  to wire after verdict)
+                                                  to wire after the result)
     paper/figures/fig_pref_headtohead.{pdf,png}
 
-Seed: 20260420 (matches P-GenRM head-to-head; pinned for reproducibility per
-G8 reproducibility gate).
-
-Audit verdict: SAFE-TO-LAUNCH per memory/code_audit_pref_2025_2150_IST.md.
+Seed: 20260420 (matches P-GenRM head-to-head; pinned for reproducibility).
 """
 from __future__ import annotations
 
@@ -164,7 +158,7 @@ import matplotlib.pyplot as plt
 from tqdm import tqdm
 
 # Paths -----------------------------------------------------------------------
-ROOT = Path(__file__).resolve().parents[3]   # 3_PILSD_Standalone/
+ROOT = Path(__file__).resolve().parents[3]   # 3_PEBS_Standalone/
 T1 = ROOT.parent / "1_Causal_RLHF"
 SCORED = T1 / "data/prism_rm_scored.parquet"
 
@@ -190,7 +184,7 @@ INIT_SCALE_RANDOM = 0.1
 
 
 # ============================================================================
-# G1 HELPER -- exact-OLS with SE (used for affine BT->scalar recalibration)
+# Helper -- exact-OLS with SE (used for affine BT->scalar recalibration)
 # ============================================================================
 
 def fit_ols_with_se(x: np.ndarray, y: np.ndarray):
@@ -213,7 +207,7 @@ def fit_ols_with_se(x: np.ndarray, y: np.ndarray):
 
 
 # ============================================================================
-# G1/G5 -- PReF base feature phi(x, y) (frozen polynomial basis on rm_score)
+# PReF base feature phi(x, y) (frozen polynomial basis on rm_score)
 # ============================================================================
 
 def build_phi(rm_scores: np.ndarray, x_mu: float, x_sd: float, J: int) -> np.ndarray:
@@ -227,7 +221,7 @@ def build_phi(rm_scores: np.ndarray, x_mu: float, x_sd: float, J: int) -> np.nda
 
 
 # ============================================================================
-# G1/G5 -- PReF Eq. 5 BT-MLE training: SVD init + L2-reg refinement
+# PReF Eq. 5 BT-MLE training: SVD init + L2-reg refinement
 # ============================================================================
 
 def _bt_loglik_grad_lambda(lam_i: np.ndarray, phi_diffs: np.ndarray,
@@ -299,7 +293,7 @@ def fit_lambda_for_user(phi_diffs: np.ndarray, A: np.ndarray, J: int,
 
 
 # ============================================================================
-# G1/G5 -- PReF Algorithm 1 step 1: SVD initialisation
+# PReF Algorithm 1 step 1: SVD initialisation
 # ============================================================================
 
 def svd_init_lambda(user_pair_phi_diffs: dict[str, np.ndarray],
@@ -350,7 +344,7 @@ def svd_init_lambda(user_pair_phi_diffs: dict[str, np.ndarray],
 
 
 # ============================================================================
-# G1/G2 -- Build PRISM-native intra-user pairwise preferences
+# Build PRISM-native intra-user pairwise preferences
 # ============================================================================
 
 def build_pairs_for_user(g_user: pd.DataFrame, x_mu: float, x_sd: float,
@@ -391,7 +385,7 @@ def build_pairs_for_user(g_user: pd.DataFrame, x_mu: float, x_sd: float,
 
 
 # ============================================================================
-# G1/G2 -- PReF prediction = lambda_i^T phi(x, y) + affine recalibration
+# PReF prediction = lambda_i^T phi(x, y) + affine recalibration
 # ============================================================================
 
 def affine_recalibrate(rm_tr: np.ndarray, sy_tr: np.ndarray,
@@ -409,7 +403,7 @@ def affine_recalibrate(rm_tr: np.ndarray, sy_tr: np.ndarray,
     with tiny std(lam_phi)), fall back to mean(sy_tr).  This guards against
     the high-J degenerate case where a frozen high-degree polynomial Phi
     produces a poorly-conditioned predictor surface; documented as honest
-    finding in audit memo G12 surface.
+    finding alongside the result.
     """
     if len(lam_phi_tr) < 3 or float(np.std(lam_phi_tr)) < 1e-8:
         return float(np.mean(sy_tr)) if len(sy_tr) > 0 else 50.0, 0.0
@@ -480,10 +474,10 @@ def method_pref(g_user: pd.DataFrame, hc_id: str,
 
 
 # ============================================================================
-# G1/G5 -- PILSD-shrunk reference (mirrors P-GenRM script for cross-script consistency)
+# PEBS-shrunk reference (mirrors P-GenRM script for cross-script consistency)
 # ============================================================================
 
-def method_pilsd_shrunk(x_tr, y_tr, x_te, alpha_pop, beta_pop, tau2_a, tau2_b):
+def method_pebs_shrunk(x_tr, y_tr, x_te, alpha_pop, beta_pop, tau2_a, tau2_b):
     a, b, se_a, se_b = fit_ols_with_se(x_tr, y_tr)
     if not np.isfinite(a):
         return alpha_pop + beta_pop * x_te
@@ -495,10 +489,10 @@ def method_pilsd_shrunk(x_tr, y_tr, x_te, alpha_pop, beta_pop, tau2_a, tau2_b):
 
 
 # ============================================================================
-# G7 -- LOCO loop with diagnostic instrumentation
+# LOCO loop with diagnostic instrumentation
 # ============================================================================
 
-# G2/G3: each method variant has a DISTINCT (J, use_svd_init, use_l2) tuple;
+# Each method variant has a DISTINCT (J, use_svd_init, use_l2) tuple;
 # the toggle changes observable lambda (verified in unit test).
 METHOD_VARIANTS = [
     # (tag,             J, use_svd_init, use_l2),
@@ -508,7 +502,7 @@ METHOD_VARIANTS = [
     ("pref_no_svd",     3, False,        True),
     ("pref_no_l2",      3, True,         False),
 ]
-METHOD_NAMES = ["pop_slope", "pilsd_shrunk"] + [v[0] for v in METHOD_VARIANTS]
+METHOD_NAMES = ["pop_slope", "pebs_shrunk"] + [v[0] for v in METHOD_VARIANTS]
 
 
 def run_loco(args):
@@ -539,7 +533,7 @@ def run_loco(args):
     x_sd = float(df["rm_score"].std())
     print(f"[phi]    x_mu={x_mu:.3f}  x_sd={x_sd:.3f}")
 
-    # PILSD MoM tau^2_a, tau^2_b (reference baseline, identical to P-GenRM script)
+    # PEBS MoM tau^2_a, tau^2_b (reference baseline, identical to P-GenRM script)
     user_stats = []
     for uid, g in df.groupby("user_id"):
         a, b, sa, sb = fit_ols_with_se(g["rm_score"].to_numpy(),
@@ -551,7 +545,7 @@ def run_loco(args):
     sbs = np.array([s[3] for s in user_stats if np.isfinite(s[3])])
     tau2_a = max(0.0, float(np.var(alphas, ddof=1) - np.mean(sas ** 2)))
     tau2_b = max(0.0, float(np.var(betas, ddof=1) - np.mean(sbs ** 2)))
-    print(f"[pilsd]  tau2_a={tau2_a:.2f}  tau2_b={tau2_b:.4f}")
+    print(f"[pebs]  tau2_a={tau2_a:.2f}  tau2_b={tau2_b:.4f}")
 
     rng_master = np.random.default_rng(args.seed)
 
@@ -563,7 +557,7 @@ def run_loco(args):
             continue
         sq = {m: [] for m in METHOD_NAMES}
         n_utt_used = 0
-        # Pin a per-user RNG so SVD init is deterministic across runs (G8)
+        # Pin a per-user RNG so SVD init is deterministic across runs
         user_seed = int(rng_master.integers(0, 2 ** 32 - 1))
         for hc in conv_ids:
             tr = g[g["conversation_id"] != hc]
@@ -576,7 +570,7 @@ def run_loco(args):
             y_te = te["score_user"].to_numpy(dtype=np.float64)
             preds = {
                 "pop_slope": alpha_pop + beta_pop * x_te,
-                "pilsd_shrunk": method_pilsd_shrunk(x_tr, y_tr, x_te,
+                "pebs_shrunk": method_pebs_shrunk(x_tr, y_tr, x_te,
                                                     alpha_pop, beta_pop,
                                                     tau2_a, tau2_b),
             }
@@ -600,7 +594,7 @@ def run_loco(args):
     pu = pd.DataFrame(per_user)
     print(f"\n[loco] {len(pu)} users evaluated")
 
-    # Relative RMSE reduction (%) vs pop_slope baseline per user (G9 schema)
+    # Relative RMSE reduction (%) vs pop_slope baseline per user
     for m in METHOD_NAMES:
         if m == "pop_slope":
             continue
@@ -656,45 +650,45 @@ def run_loco(args):
             "rmse_reduction_pct_mean": mean_g,
             "rmse_reduction_pct_ci95": [lo, hi],
             "rmse_reduction_pct_se": se,
-            "status": "reimplementation" if m != "pilsd_shrunk" else "reference",
+            "status": "reimplementation" if m != "pebs_shrunk" else "reference",
         }
         print(f"{m:>20s}  {pu[f'rmse_{m}'].mean():8.3f}  "
               f"{mean_g:+9.3f}  [{lo:+6.3f}, {hi:+6.3f}]")
 
-    # Paired delta vs PILSD-shrunk
-    pilsd_gain = pu["gain_pilsd_shrunk_pct"].to_numpy()
-    summary["paired_vs_pilsd"] = {}
+    # Paired delta vs PEBS-shrunk
+    pebs_gain = pu["gain_pebs_shrunk_pct"].to_numpy()
+    summary["paired_vs_pebs"] = {}
     for m in METHOD_NAMES:
-        if m in ("pop_slope", "pilsd_shrunk"):
+        if m in ("pop_slope", "pebs_shrunk"):
             continue
-        diff = pilsd_gain - pu[f"gain_{m}_pct"].to_numpy()
+        diff = pebs_gain - pu[f"gain_{m}_pct"].to_numpy()
         md, lo, hi, se = cluster_boot_ci(diff, args.n_boot, args.seed + 1)
-        summary["paired_vs_pilsd"][m] = {
+        summary["paired_vs_pebs"][m] = {
             "mean_delta_pct": md, "ci95": [lo, hi], "se": se,
-            "pilsd_better": bool(lo > 0),
+            "pebs_better": bool(lo > 0),
         }
         sig = "*" if lo > 0 or hi < 0 else ""
-        print(f"  PILSD - {m:>16s}: {md:+.3f}%  CI [{lo:+.3f}, {hi:+.3f}] {sig}")
+        print(f"  PEBS - {m:>16s}: {md:+.3f}%  CI [{lo:+.3f}, {hi:+.3f}] {sig}")
 
-    # G12 honest-disclosure verdict assignment per 4-class STRICT vocabulary
-    pilsd_g_lo = summary["methods"]["pilsd_shrunk"]["rmse_reduction_pct_ci95"][0]
+    # Outcome assignment
+    pebs_g_lo = summary["methods"]["pebs_shrunk"]["rmse_reduction_pct_ci95"][0]
     pref_full_keys = ["pref_J2_full", "pref_J3_full", "pref_J6_full"]
-    pilsd_dom_full = all(
-        summary["paired_vs_pilsd"][m]["pilsd_better"]
+    pebs_dom_full = all(
+        summary["paired_vs_pebs"][m]["pebs_better"]
         for m in pref_full_keys
     )
     pref_dom_full = all(
-        summary["paired_vs_pilsd"][m]["ci95"][1] < 0
+        summary["paired_vs_pebs"][m]["ci95"][1] < 0
         for m in pref_full_keys
     )
-    if pilsd_g_lo > 0 and pilsd_dom_full:
-        summary["verdict_class"] = "ESTABLISHED-PILSD-GAIN-DOMINATES-PREF-ON-PER-USER-RMSE"
-    elif pilsd_g_lo > 0 and pref_dom_full:
-        summary["verdict_class"] = "FALSIFIED-PREF-DOMINATES-PILSD-ON-PER-USER-RMSE"
-    elif pilsd_g_lo > 0:
-        summary["verdict_class"] = "MODERATE-PILSD-GAIN-PARITY-WITH-PREF"
+    if pebs_g_lo > 0 and pebs_dom_full:
+        summary["verdict_class"] = "CONFIRMED-PEBS-GAIN-DOMINATES-PREF-ON-PER-USER-RMSE"
+    elif pebs_g_lo > 0 and pref_dom_full:
+        summary["verdict_class"] = "REJECTED-PREF-DOMINATES-PEBS-ON-PER-USER-RMSE"
+    elif pebs_g_lo > 0:
+        summary["verdict_class"] = "PARTIAL-PEBS-GAIN-PARITY-WITH-PREF"
     else:
-        summary["verdict_class"] = "PRELIMINARY-INCONCLUSIVE-PILSD-GAIN-CI-INCLUDES-ZERO"
+        summary["verdict_class"] = "TENTATIVE-INCONCLUSIVE-PEBS-GAIN-CI-INCLUDES-ZERO"
 
     summary["runtime_seconds"] = float(time.time() - t0)
 
@@ -711,7 +705,7 @@ def run_loco(args):
 
 def write_latex_table(summary: dict, out_path: Path):
     pretty = {
-        "pilsd_shrunk":     ("\\PILSD{} \\emph{(ours)}",
+        "pebs_shrunk":     ("\\PEBS{} \\emph{(ours)}",
                               "Per-user EB-shrunk $(\\alpha_j, \\beta_j)$ affine calibrator",
                               "hierarchical EB"),
         "pref_J2_full":     ("PReF $J{=}2$ \\citep{zhang2025pref}",
@@ -730,7 +724,7 @@ def write_latex_table(summary: dict, out_path: Path):
                               "$\\beta{=}0$ ablation (paper Sec. 5.5)",
                               "BT-MLE"),
     }
-    order = ["pilsd_shrunk", "pref_J2_full", "pref_J3_full", "pref_J6_full",
+    order = ["pebs_shrunk", "pref_J2_full", "pref_J3_full", "pref_J6_full",
              "pref_no_svd", "pref_no_l2"]
     lines = []
     lines.append("% PReF (Shenfeld, Faltings, Agrawal, Pacchiano 2025) head-to-head on PRISM.")
@@ -776,7 +770,7 @@ def write_latex_table(summary: dict, out_path: Path):
         meth = summary['methods'][m]
         g = meth['rmse_reduction_pct_mean']
         ci = meth['rmse_reduction_pct_ci95']
-        g_s = f"\\textbf{{{g:+.2f}}}" if m == "pilsd_shrunk" else f"{g:+.2f}"
+        g_s = f"\\textbf{{{g:+.2f}}}" if m == "pebs_shrunk" else f"{g:+.2f}"
         ci_s = f"[{ci[0]:+.2f}, {ci[1]:+.2f}]"
         lines.append(f"{pretty_name} & {recipe} & {tag} & {g_s} & {ci_s} \\\\")
     lines.append("\\bottomrule")
@@ -789,16 +783,16 @@ def write_latex_table(summary: dict, out_path: Path):
 
 
 def write_figure(summary: dict, out_path: Path):
-    pretty = {"pilsd_shrunk": "PILSD (ours)",
+    pretty = {"pebs_shrunk": "PEBS (ours)",
               "pref_J2_full": "PReF J=2",
               "pref_J3_full": "PReF J=3",
               "pref_J6_full": "PReF J=6",
               "pref_no_svd": "PReF (no SVD)",
               "pref_no_l2": "PReF (no L2)"}
-    order = ["pilsd_shrunk", "pref_J2_full", "pref_J3_full", "pref_J6_full",
+    order = ["pebs_shrunk", "pref_J2_full", "pref_J3_full", "pref_J6_full",
              "pref_no_svd", "pref_no_l2"]
     order = [m for m in order if m in summary['methods']]
-    colors = {"pilsd_shrunk": "#1f77b4",
+    colors = {"pebs_shrunk": "#1f77b4",
               "pref_J2_full": "#ffbb78",
               "pref_J3_full": "#ff7f0e",
               "pref_J6_full": "#d62728",
@@ -820,7 +814,7 @@ def write_figure(summary: dict, out_path: Path):
         va = "bottom" if mval >= 0 else "top"
         ax.text(b.get_x() + b.get_width() / 2, label_y, f"{mval:+.2f}%",
                 ha="center", va=va, fontsize=9,
-                fontweight="bold" if order[i] == "pilsd_shrunk" else "normal")
+                fontweight="bold" if order[i] == "pebs_shrunk" else "normal")
     ax.axhline(0, color="gray", lw=0.7, ls="--")
     ax.set_xticks(x)
     ax.set_xticklabels([pretty[m] for m in order], rotation=15, fontsize=9, ha="right")

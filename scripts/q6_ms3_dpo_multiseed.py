@@ -1,7 +1,7 @@
 """Q6-MS3 - multi-seed Mistral DPO replication for Q6.
 
 This script runs three additional Mistral-7B Q6 DPO seeds after the Q6
-cross-backbone verdict showed a strongly positive Mistral held-out
+cross-backbone run showed a strongly positive Mistral held-out
 pair-accuracy delta. It intentionally wraps the existing
 `q6_dpo_downstream_impact.py` implementation instead of duplicating DPO
 training or evaluation logic.
@@ -61,7 +61,7 @@ DEFAULT_OUT_DIR = ROOT / "results" / "track1_q6_ms3_dpo_multiseed_mistral"
 DEFAULT_PRIOR_Q6_DIR = ROOT / "results" / "track1_q6_dpo_downstream_impact_mistral_7b"
 CANONICAL_Q6_DIR = ROOT / "results" / "track1_q6_dpo_downstream_impact"
 PAIR_A_NAME = "pairs_arm_a_uncorrected.parquet"
-PAIR_B_NAME = "pairs_arm_b_pilsd_corrected.parquet"
+PAIR_B_NAME = "pairs_arm_b_pebs_corrected.parquet"
 
 MULTISEED_ESTABLISHED_DELTA_PP = 1.5
 MULTISEED_MODERATE_DELTA_PP = 1.0
@@ -115,7 +115,7 @@ def localize_workspace_path(raw: str | None) -> Path | None:
         return None
     path = Path(raw)
     raw_s = str(path)
-    prefix = "/workspace/3_PILSD_Standalone"
+    prefix = "/workspace/3_PEBS_Standalone"
     if raw_s.startswith(prefix):
         return ROOT / raw_s[len(prefix):].lstrip("/")
     return path
@@ -199,7 +199,7 @@ def load_prior_pairs(
 
     pair_diag = q6.diagnose_pair_diff(arm_a, arm_b)
     if not pair_diag.get("g3_silent_bypass_pass", False):
-        raise ValueError(f"G3 silent-bypass gate failed in prior pairs: {pair_diag}")
+        raise ValueError(f"silent-bypass guard failed in prior pairs: {pair_diag}")
 
     return arm_a, arm_b, {
         "source": source,
@@ -505,16 +505,16 @@ def aggregate_seed_rows(seed_rows: list[dict[str, Any]]) -> dict[str, Any]:
         verdict = "RUNTIME-ERROR-SEED-FAILED"
         rule = "one or more per-seed parent Q6 runs returned non-zero"
     elif n == len(seed_rows) and pos_ci == len(seed_rows) and ci_lo > 0 and mean_delta >= MULTISEED_ESTABLISHED_DELTA_PP:
-        verdict = "ESTABLISHED-DPO-PILSD-DOMINATES-MULTISEED"
+        verdict = "CONFIRMED-DPO-PEBS-DOMINATES-MULTISEED"
         rule = "all seeds positive, per-seed CIs exclude 0, cross-seed CI excludes 0, mean >= +1.5pp"
     elif n == len(seed_rows) and pos_ci >= max(2, len(seed_rows) - 1) and mean_delta >= MULTISEED_MODERATE_DELTA_PP:
-        verdict = "MODERATE-DPO-PILSD-PARTIAL-DOMINATES-MULTISEED"
+        verdict = "PARTIAL-DPO-PEBS-PARTIAL-DOMINATES-MULTISEED"
         rule = "at least 2 seeds positive with mean >= +1.0pp"
     elif n == len(seed_rows) and (mean_delta <= 0 or neg_ci > 0):
-        verdict = "FALSIFIED-DPO-SEED-ARTIFACT"
+        verdict = "REJECTED-DPO-SEED-ARTIFACT"
         rule = "mean delta <= 0 or at least one per-seed CI is strictly negative"
     else:
-        verdict = "PRELIMINARY-DPO-SEED-VARIABLE"
+        verdict = "TENTATIVE-DPO-SEED-VARIABLE"
         rule = "seed effects are mixed or cross-seed uncertainty remains too wide"
 
     return {
@@ -541,14 +541,8 @@ def build_summary(args: argparse.Namespace, preflight_result: dict[str, Any], se
         "experiment_id": "Q6_MS3_dpo_multiseed_mistral",
         "verdict_class": aggregate["verdict_class"],
         "args": vars(args),
-        "skill_citations": [
-            "Skill: research-grade-code-audit-pre-launch v1 G1-G12 (manual fallback in this session)",
-            "Skill: launch-runpod-h100-job (setsid/nohup dispatch target)",
-            "Skill: post-experiment-discipline-3-track Step 4-7",
-            "Skill: honest-disclosure 4-class STRICT 6.3",
-        ],
         "anchors": {
-            "trigger": "Q6 cross-backbone Mistral strongly MODERATE-positive",
+            "trigger": "Q6 cross-backbone Mistral strongly positive",
             "base_model": args.base_model_id,
             "prior_q6_dir": str(args.prior_q6_output_dir),
             "no_internal_kill_switches": "no time-based watchdogs or subprocess timeouts",
@@ -557,7 +551,7 @@ def build_summary(args: argparse.Namespace, preflight_result: dict[str, Any], se
             "This is a three-additional-seed Mistral replication of held-out PRISM pair-accuracy.",
             "AlpacaEval-2 is skipped by default, matching Q6 cross-backbone; policy quality claim remains PRISM held-out pair-accuracy unless later KPI runs are added.",
             "Per-seed user-disjoint splits vary with seed; all other DPO hyperparameters inherit from the completed Mistral Q6 run.",
-            "FALSIFIED and PRELIMINARY verdict branches are explicit and publishable as seed-sensitivity bounds.",
+            "REJECTED and TENTATIVE outcome branches are explicit and publishable as seed-sensitivity bounds.",
         ],
         "stages": {
             "preflight": preflight_result,

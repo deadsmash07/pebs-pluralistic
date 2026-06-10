@@ -1,8 +1,8 @@
-"""Toy validation: is the PRISM α vs β PILSD decomposition a direct
+"""Toy validation: is the PRISM α vs β PEBS decomposition a direct
 consequence of the (σ_α, σ_β) variance ratio, or does it require any
 mechanism beyond that?
 
-CLAIM under test (iter+N+93 / commit 86e29bb on PRISM):
+CLAIM under test (PRISM):
     pop_slope  : baseline
     α_only     : +7.58% RMSE improvement
     β_only     : +0.96%
@@ -15,7 +15,7 @@ PRISM empirical calibrator variance:
     σ_β = sqrt(τ_β²_only) = sqrt(28.00)  = 5.29  (paper 4.82 w/ full pooling)
     ρ(α,β) ≈ 0.09
 
-We simulate 3 DGPs with the SAME generative form used by PILSD on
+We simulate 3 DGPs with the SAME generative form used by PEBS on
 PRISM (y = α_j + β_j · x + ε) and run the same 4-arm ablation + EB
 shrinkage. If ONLY the variance ratio matters, PRISM_RATIO DGP should
 reproduce the 88%/12% split.
@@ -31,7 +31,7 @@ Pipeline per (DGP, seed)
 - Sample N=1000 users with calibrators (α_j, β_j) from the target MVN.
 - For each user, sample K=30 (x, y) pairs: x ~ N(0, σ_x²); y = α_j + β_j x + ε.
 - Global fit: α_pop, β_pop via OLS on all pooled (x, y).
-- Per-user train: first k=5 points (the point of PILSD cold-start) or all-but-holdout;
+- Per-user train: first k=5 points (the point of PEBS cold-start) or all-but-holdout;
   here we use the same 5-fold CV pattern PRISM uses on users.
 - 4 arms on held-out split within each user (k-fold):
     pop_slope  : y_hat = α_pop + β_pop x

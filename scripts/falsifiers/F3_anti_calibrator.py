@@ -1,12 +1,12 @@
 """F3 — Anti-calibrator (inverted-slope).
 
-Pre-registered (iter+N+290) falsifier for the claim that PILSD's
+Pre-registered falsifier for the claim that PEBS's
 directionality (slope sign) is load-bearing, as opposed to the shrinkage
 STRUCTURE alone driving the gain regardless of direction.
 
 Design
 ------
-Apply standard PILSD LOCO pipeline. For each user, compute the standard
+Apply standard PEBS LOCO pipeline. For each user, compute the standard
 EB-shrunk (alpha_shrunk, beta_shrunk), then deliberately construct the
 ANTI-calibrator prediction on the held-out fold by flipping the slope
 sign:
@@ -14,9 +14,9 @@ sign:
     pred_anti2 = alpha_shrunk + (1 - beta_shrunk) * x_te (1-beta spec)
 
 Compare RMSE of anti-calibrator vs pop-slope baseline and vs standard
-PILSD on the same held-out slice, with cluster-bootstrap 95% CI.
+PEBS on the same held-out slice, with cluster-bootstrap 95% CI.
 
-Pre-registered criterion (iter+N+290):
+Pre-registered criterion:
   CONFIRMING:  RMSE(anti) - RMSE(pop_slope) (as a relative %) is >= +5 pp
                WORSE than pop-slope (lower bound of CI > 0 increase),
                demonstrating directionality is load-bearing.
@@ -25,7 +25,7 @@ Pre-registered criterion (iter+N+290):
 
 Outputs
 -------
-results/falsifiers_iter290/F3_anti_calibrator.json
+results/falsifiers/F3_anti_calibrator.json
 """
 from __future__ import annotations
 
@@ -39,7 +39,7 @@ import pandas as pd
 ROOT = Path(__file__).resolve().parents[2]
 T1 = ROOT.parent / "1_Causal_RLHF"
 SCORED = T1 / "data/prism_rm_scored.parquet"
-OUT = ROOT / "results/falsifiers_iter290"
+OUT = ROOT / "results/falsifiers"
 
 MIN_CONV_PER_USER = 2
 MIN_UTT_PER_USER = 10
@@ -111,7 +111,7 @@ def main():
         conv_ids = g["conversation_id"].unique().tolist()
         if len(conv_ids) < MIN_CONV_PER_USER:
             continue
-        sq_pop, sq_pilsd, sq_anti_flip, sq_anti_1minus = [], [], [], []
+        sq_pop, sq_pebs, sq_anti_flip, sq_anti_1minus = [], [], [], []
         n_utt_used = 0
         for hc in conv_ids:
             tr = g[g["conversation_id"] != hc]
@@ -125,12 +125,12 @@ def main():
             a_s, b_s, _, _ = shrunk_params(x_tr, y_tr, alpha_pop, beta_pop, tau2_a, tau2_b)
 
             pred_pop = alpha_pop + beta_pop * x_te
-            pred_pilsd = a_s + b_s * x_te
+            pred_pebs = a_s + b_s * x_te
             pred_anti_flip = a_s - b_s * x_te            # slope-sign flipped
             pred_anti_1minus = a_s + (1.0 - b_s) * x_te  # 1-beta inversion
 
             sq_pop.extend(((pred_pop - y_te) ** 2).tolist())
-            sq_pilsd.extend(((pred_pilsd - y_te) ** 2).tolist())
+            sq_pebs.extend(((pred_pebs - y_te) ** 2).tolist())
             sq_anti_flip.extend(((pred_anti_flip - y_te) ** 2).tolist())
             sq_anti_1minus.extend(((pred_anti_1minus - y_te) ** 2).tolist())
             n_utt_used += len(y_te)
@@ -139,12 +139,12 @@ def main():
         per_user.append({
             "user_id": uid, "n_utt": n_utt_used,
             "rmse_pop": float(np.sqrt(np.mean(sq_pop))),
-            "rmse_pilsd": float(np.sqrt(np.mean(sq_pilsd))),
+            "rmse_pebs": float(np.sqrt(np.mean(sq_pebs))),
             "rmse_anti_flip": float(np.sqrt(np.mean(sq_anti_flip))),
             "rmse_anti_1minus": float(np.sqrt(np.mean(sq_anti_1minus))),
         })
     pu = pd.DataFrame(per_user)
-    pu["gain_pilsd_pct"] = 100.0 * (pu["rmse_pop"] - pu["rmse_pilsd"]) / pu["rmse_pop"]
+    pu["gain_pebs_pct"] = 100.0 * (pu["rmse_pop"] - pu["rmse_pebs"]) / pu["rmse_pop"]
     pu["hurt_anti_flip_pct"] = 100.0 * (pu["rmse_anti_flip"] - pu["rmse_pop"]) / pu["rmse_pop"]
     pu["hurt_anti_1minus_pct"] = 100.0 * (pu["rmse_anti_1minus"] - pu["rmse_pop"]) / pu["rmse_pop"]
 
@@ -158,13 +158,13 @@ def main():
         lo, hi = np.percentile(boots, [2.5, 97.5])
         return float(values.mean()), float(lo), float(hi)
 
-    gain_pilsd = boot_ci(pu["gain_pilsd_pct"].to_numpy())
+    gain_pebs = boot_ci(pu["gain_pebs_pct"].to_numpy())
     hurt_flip = boot_ci(pu["hurt_anti_flip_pct"].to_numpy())
     hurt_1m = boot_ci(pu["hurt_anti_1minus_pct"].to_numpy())
 
     print("\n=== F3 anti-calibrator results ===")
     print(f"N users evaluated: {len(pu)}")
-    print(f"PILSD gain vs pop: {gain_pilsd[0]:+.3f}pp  CI [{gain_pilsd[1]:+.2f}, {gain_pilsd[2]:+.2f}]")
+    print(f"PEBS gain vs pop: {gain_pebs[0]:+.3f}pp  CI [{gain_pebs[1]:+.2f}, {gain_pebs[2]:+.2f}]")
     print(f"Anti-flip HURT vs pop: {hurt_flip[0]:+.3f}pp  CI [{hurt_flip[1]:+.2f}, {hurt_flip[2]:+.2f}]")
     print(f"Anti-(1-b) HURT vs pop: {hurt_1m[0]:+.3f}pp  CI [{hurt_1m[1]:+.2f}, {hurt_1m[2]:+.2f}]")
 
@@ -186,7 +186,7 @@ def main():
         "beta_pop": beta_pop,
         "tau2_a": tau2_a,
         "tau2_b": tau2_b,
-        "pilsd_gain_pp": {"mean": gain_pilsd[0], "ci95": [gain_pilsd[1], gain_pilsd[2]]},
+        "pebs_gain_pp": {"mean": gain_pebs[0], "ci95": [gain_pebs[1], gain_pebs[2]]},
         "anti_flip_hurt_pp": {"mean": hurt_flip[0], "ci95": [hurt_flip[1], hurt_flip[2]]},
         "anti_1minus_hurt_pp": {"mean": hurt_1m[0], "ci95": [hurt_1m[1], hurt_1m[2]]},
         "branch_disposition": {

@@ -1,19 +1,19 @@
-"""T1 mean-only NULL baseline for calibrator transferability (iter+N+253).
+"""T1 mean-only NULL baseline for calibrator transferability.
 
-Adversarial-reviewer attack B (commit 38a164f):
-    "PILSD's 0.91 cross-backbone transferability ratio is contingent on
+The null hypothesis worth ruling out:
+    "PEBS's 0.91 cross-backbone transferability ratio is contingent on
     per-backbone z-score rescaling which collapses scale + intercept
     structure. The 'calibrator' that transfers may just be per-user bias
     (intercept), not the per-user regression-shrinkage object (slope)."
 
 Test
 ----
-Repeat the iter+N+236 3x3 transferability matrix with a "mean-only"
+Repeat the 3x3 transferability matrix with a "mean-only"
 estimator that fixes beta = 1 in z-scored units (hence the only per-user
 degree of freedom is the intercept alpha_j). If the mean-only NULL
-matches the PILSD-shrunk (alpha_j, beta_j) transfer gains, the
+matches the PEBS-shrunk (alpha_j, beta_j) transfer gains, the
 transferability claim collapses to per-user demeaning (trivial). If the
-mean-only NULL is materially worse, PILSD's slope-shrinkage machinery
+mean-only NULL is materially worse, PEBS's slope-shrinkage machinery
 does the work.
 
 Design
@@ -23,17 +23,17 @@ For each user j and source backbone A:
                           = mean(y^train) - mean(z_A(x_A^train))
     predict on target B:  yhat = alpha_j^A + 1.0 * z_B(x_B^test)
 
-PILSD-shrunk (std) transfer (from iter+N+236 artifact):
+PEBS-shrunk (std) transfer (from the original transferability artifact):
     predict_target = alpha_j^A (shrunk) + beta_j^A (shrunk) * z_B(x_B^test)
 
 Both are evaluated on the SAME k-fold splits (seed=20260420, k=5) on the
-SAME 1394 users / 68371-utterance inner join as iter+N+236 so gaps are
+SAME 1394 users / 68371-utterance inner join as the original run so gaps are
 apples-to-apples.
 
-Gap per cell = PILSD_std_gain% - MeanOnly_gain%     (positive ==> slope
+Gap per cell = PEBS_std_gain% - MeanOnly_gain%     (positive ==> slope
 shrinkage adds value; near zero ==> intercept alone suffices).
 Cluster-bootstrap over users (n_boot=2000, seed=20260420) on the
-PAIRED per-user gain-difference (delta_j = gain_pilsd_j - gain_meanonly_j)
+PAIRED per-user gain-difference (delta_j = gain_pebs_j - gain_meanonly_j)
 to get a 95% CI on the gap itself.
 
 Outputs
@@ -77,12 +77,12 @@ def parse_args():
     p.add_argument("--n-boot", type=int, default=2000)
     p.add_argument("--output-dir",
                    default="results/track1_mean_only_transferability_null")
-    p.add_argument("--pilsd-summary",
+    p.add_argument("--pebs-summary",
                    default="results/track1_calibrator_transferability/summary.json",
-                   help="Prior PILSD-shrunk transferability summary for gap reporting.")
-    p.add_argument("--pilsd-per-user",
+                   help="Prior PEBS-shrunk transferability summary for gap reporting.")
+    p.add_argument("--pebs-per-user",
                    default="results/track1_calibrator_transferability/per_user_rmse.parquet",
-                   help="Prior PILSD-shrunk per-user RMSE parquet for paired per-user deltas.")
+                   help="Prior PEBS-shrunk per-user RMSE parquet for paired per-user deltas.")
     p.add_argument("--figure-path",
                    default="paper/figures/fig_22_t1_transferability_ablation.pdf")
     p.add_argument("--paper-insert",
@@ -91,7 +91,7 @@ def parse_args():
 
 
 def kfold_split(n: int, k: int, rng):
-    """Identical splitter to iter+N+236 (so folds match exactly when seeds match)."""
+    """Identical splitter to the original transferability run (so folds match exactly when seeds match)."""
     idx = np.arange(n)
     rng.shuffle(idx)
     folds = []
@@ -129,7 +129,7 @@ def main():
     out_dir.mkdir(parents=True, exist_ok=True)
     (root / args.figure_path).parent.mkdir(parents=True, exist_ok=True)
 
-    # --- 1. Load + inner-join (same as iter+N+236) -------------------------
+    # --- 1. Load + inner-join (same as the original transferability run) -------------------------
     frames = {}
     for name, parquet, col in BACKBONES:
         df = pd.read_parquet(root / parquet)
@@ -185,7 +185,7 @@ def main():
 
         sq = {a: [] for a in arms}
         # NOTE: rng is re-used from the module-level rng so this runs fold
-        # shuffles in the SAME order as iter+N+236 for user-ordering parity.
+        # shuffles in the SAME order as the original run for user-ordering parity.
         for train_idx, test_idx in kfold_split(n, args.k_folds, rng):
             if len(test_idx) == 0:
                 continue
@@ -207,7 +207,7 @@ def main():
                 muB, sdB = score_mean[B], score_std[B]
                 zB_te = (xB_te - muB) / sdB
 
-                # baseline pop_slope on raw target scores (matches iter+N+236)
+                # baseline pop_slope on raw target scores (matches the original run)
                 yh = pop_raw[B]["alpha"] + pop_raw[B]["beta"] * xB_te
                 sq[f"pop_{B}"].extend(((yh - y_te) ** 2).tolist())
 
@@ -227,12 +227,12 @@ def main():
     pu.to_parquet(out_dir / "per_user_rmse.parquet")
     print(f"[per_user] {len(pu)} users evaluated\n")
 
-    # --- 4. Load PILSD-shrunk per-user RMSE for paired gap -----------------
-    pilsd_pu = pd.read_parquet(root / args.pilsd_per_user)
-    pilsd_summary = json.loads((root / args.pilsd_summary).read_text())
+    # --- 4. Load PEBS-shrunk per-user RMSE for paired gap -----------------
+    pebs_pu = pd.read_parquet(root / args.pebs_per_user)
+    pebs_summary = json.loads((root / args.pebs_summary).read_text())
     # Align on user_id
-    pu_aligned = pu.merge(pilsd_pu, on="user_id", how="inner", suffixes=("", "_pilsd"))
-    print(f"[align] {len(pu_aligned)} users shared with PILSD-shrunk artifact")
+    pu_aligned = pu.merge(pebs_pu, on="user_id", how="inner", suffixes=("", "_pebs"))
+    print(f"[align] {len(pu_aligned)} users shared with PEBS-shrunk artifact")
 
     # --- 5. Build 3x3 mean-only NULL matrix with cluster-bootstrap CIs -----
     bnames = list(backbone_cols)
@@ -270,43 +270,43 @@ def main():
                 "wilcoxon_less_p": float(w.pvalue),
             }
 
-            # paired GAP vs PILSD-shrunk STD transfer on same users
+            # paired GAP vs PEBS-shrunk STD transfer on same users
             if A == B:
-                pilsd_col = f"rmse_transfer_raw_{A}_to_{B}"
+                pebs_col = f"rmse_transfer_raw_{A}_to_{B}"
             else:
-                pilsd_col = f"rmse_transfer_std_{A}_to_{B}"
+                pebs_col = f"rmse_transfer_std_{A}_to_{B}"
             mo = pu_aligned[col_pred].to_numpy()
-            pi = pu_aligned[pilsd_col].to_numpy()
+            pi = pu_aligned[pebs_col].to_numpy()
             bs = pu_aligned[col_base].to_numpy()
             mk = np.isfinite(mo) & np.isfinite(pi) & np.isfinite(bs)
             mo = mo[mk]; pi = pi[mk]; bs = bs[mk]
             gain_mo = 100.0 * (bs - mo) / bs
             gain_pi = 100.0 * (bs - pi) / bs
-            delta = gain_pi - gain_mo        # positive ==> PILSD > mean-only
+            delta = gain_pi - gain_mo        # positive ==> PEBS > mean-only
             d_ci_lo, d_ci_hi = cluster_bootstrap_mean(
                 delta, n_boot=args.n_boot,
                 seed=args.seed + hash((A, B, "gap")) % 100000,
             )
             gap_matrix[f"{A}__to__{B}"] = {
-                "pilsd_gain_pct": float(gain_pi.mean()),
+                "pebs_gain_pct": float(gain_pi.mean()),
                 "meanonly_gain_pct": float(gain_mo.mean()),
                 "gap_pct": float(delta.mean()),
                 "gap_ci95": [d_ci_lo, d_ci_hi],
-                "wilcoxon_pilsd_less_p": float(
+                "wilcoxon_pebs_less_p": float(
                     stats.wilcoxon(pi, mo, alternative="less").pvalue
                 ),
                 "n_users_paired": int(len(delta)),
             }
 
     # --- 6. Verdict: mean-only "ratio" in the reviewer's idiom -------------
-    # reviewer spec: if mean-only NULL >= 80% of PILSD-shrunk ==> slope
+    # reviewer spec: if mean-only NULL >= 80% of PEBS-shrunk ==> slope
     # contributes little; if <= 50% ==> slope does heavy lifting.
     ratios_off = []
     ratios_diag = []
     for A in bnames:
         for B in bnames:
             cell_mo = mean_only_matrix[f"{A}__to__{B}"]["mean_gain_pct"]
-            cell_pi = pilsd_summary["transfer_matrix_std"][f"{A}__to__{B}"]["mean_gain_pct"]
+            cell_pi = pebs_summary["transfer_matrix_std"][f"{A}__to__{B}"]["mean_gain_pct"]
             r = cell_mo / cell_pi if abs(cell_pi) > 1e-9 else float("nan")
             if A == B:
                 ratios_diag.append(r)
@@ -318,9 +318,9 @@ def main():
     # Best-transfer "0.91" style
     best_ratios_mo, best_ratios_pi = [], []
     for B in bnames:
-        diag_pi = pilsd_summary["transfer_matrix_std"][f"{B}__to__{B}"]["mean_gain_pct"]
+        diag_pi = pebs_summary["transfer_matrix_std"][f"{B}__to__{B}"]["mean_gain_pct"]
         diag_mo = mean_only_matrix[f"{B}__to__{B}"]["mean_gain_pct"]
-        off_pi = [pilsd_summary["transfer_matrix_std"][f"{A}__to__{B}"]["mean_gain_pct"]
+        off_pi = [pebs_summary["transfer_matrix_std"][f"{A}__to__{B}"]["mean_gain_pct"]
                   for A in bnames if A != B]
         off_mo = [mean_only_matrix[f"{A}__to__{B}"]["mean_gain_pct"]
                   for A in bnames if A != B]
@@ -331,11 +331,11 @@ def main():
     mean_best_over_within_mo = float(np.mean(best_ratios_mo))
 
     if mean_ratio_off >= 0.80:
-        verdict = "SLOPE_TRIVIAL__mean_only_matches_PILSD"
+        verdict = "SLOPE_TRIVIAL__mean_only_matches_PEBS"
     elif mean_ratio_off >= 0.50:
         verdict = "SLOPE_PARTIAL__mean_only_recovers_some"
     else:
-        verdict = "SLOPE_MATTERS__attack_defeated"
+        verdict = "SLOPE_MATTERS__null_rejected"
 
     # --- 7. Print summary tables -------------------------------------------
     print("=== 3x3 MEAN-ONLY NULL MATRIX (gain%% vs pop_slope_target) ===")
@@ -350,17 +350,17 @@ def main():
             row += f"{marker}{cell['mean_gain_pct']:+7.2f}%".rjust(16)
         print(row)
 
-    print("\n=== 3x3 PILSD-SHRUNK STD MATRIX (iter+N+236) ===")
+    print("\n=== 3x3 PEBS-SHRUNK STD MATRIX ===")
     print(hdr)
     for A in bnames:
         row = f"{PRETTY[A]:<14}"
         for B in bnames:
-            cell = pilsd_summary["transfer_matrix_std"][f"{A}__to__{B}"]
+            cell = pebs_summary["transfer_matrix_std"][f"{A}__to__{B}"]
             marker = "*" if cell["diagonal"] else " "
             row += f"{marker}{cell['mean_gain_pct']:+7.2f}%".rjust(16)
         print(row)
 
-    print("\n=== 3x3 GAP = PILSD - mean-only (paired per-user delta%%) ===")
+    print("\n=== 3x3 GAP = PEBS - mean-only (paired per-user delta%%) ===")
     print(hdr)
     for A in bnames:
         row = f"{PRETTY[A]:<14}"
@@ -371,9 +371,9 @@ def main():
             row += f"{diag}{gp['gap_pct']:+5.2f} [{ci[0]:+.2f},{ci[1]:+.2f}]".rjust(16)
         print(row)
 
-    print(f"\n[verdict] mean(mean-only / PILSD) off-diagonal = {mean_ratio_off:.3f}")
-    print(f"[verdict] mean(mean-only / PILSD) diagonal     = {mean_ratio_diag:.3f}")
-    print(f"[verdict] best-transfer/within, PILSD-std      = {mean_best_over_within_pi:.3f}")
+    print(f"\n[verdict] mean(mean-only / PEBS) off-diagonal = {mean_ratio_off:.3f}")
+    print(f"[verdict] mean(mean-only / PEBS) diagonal     = {mean_ratio_diag:.3f}")
+    print(f"[verdict] best-transfer/within, PEBS-std      = {mean_best_over_within_pi:.3f}")
     print(f"[verdict] best-transfer/within, mean-only      = {mean_best_over_within_mo:.3f}")
     print(f"[verdict] label                                = {verdict}")
 
@@ -382,7 +382,7 @@ def main():
         "iter": "N+253",
         "seed": args.seed,
         "n_users": int(len(pu)),
-        "n_users_paired_with_pilsd": int(len(pu_aligned)),
+        "n_users_paired_with_pebs": int(len(pu_aligned)),
         "k_folds": args.k_folds,
         "min_obs_per_user": args.min_obs_per_user,
         "n_boot": args.n_boot,
@@ -391,11 +391,11 @@ def main():
         "score_std": score_std,
         "pop_raw": pop_raw,
         "mean_only_matrix": mean_only_matrix,
-        "pilsd_std_matrix_reference": pilsd_summary["transfer_matrix_std"],
+        "pebs_std_matrix_reference": pebs_summary["transfer_matrix_std"],
         "gap_matrix": gap_matrix,
-        "mean_ratio_meanonly_over_pilsd_offdiag": mean_ratio_off,
-        "mean_ratio_meanonly_over_pilsd_diag": mean_ratio_diag,
-        "mean_best_over_within_ratio_pilsd_std": mean_best_over_within_pi,
+        "mean_ratio_meanonly_over_pebs_offdiag": mean_ratio_off,
+        "mean_ratio_meanonly_over_pebs_diag": mean_ratio_diag,
+        "mean_best_over_within_ratio_pebs_std": mean_best_over_within_pi,
         "mean_best_over_within_ratio_meanonly": mean_best_over_within_mo,
         "verdict": verdict,
     }
@@ -432,13 +432,13 @@ def main():
     ax.set_ylabel("Source backbone (fit intercept)")
     ax.set_title(
         f"(a) Mean-only NULL: $\\alpha_j^A + 1 \\cdot z_B(x)$\n"
-        f"mean-only/PILSD off-diag ratio = {mean_ratio_off:.2f}",
+        f"mean-only/PEBS off-diag ratio = {mean_ratio_off:.2f}",
         fontsize=11,
     )
     plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04,
                  label="% RMSE reduction vs pop_slope_target")
 
-    # Panel 2: gap = PILSD - mean-only (paired delta per cell)
+    # Panel 2: gap = PEBS - mean-only (paired delta per cell)
     ax = axes[1]
     G = np.zeros((len(bnames), len(bnames)))
     for i, A in enumerate(bnames):
@@ -462,7 +462,7 @@ def main():
     ax.set_xlabel("Target backbone")
     ax.set_ylabel("Source backbone")
     ax.set_title(
-        f"(b) Gap = PILSD - mean-only (paired)\n"
+        f"(b) Gap = PEBS - mean-only (paired)\n"
         f"positive = slope shrinkage adds value",
         fontsize=11,
     )
@@ -470,7 +470,7 @@ def main():
                  label="% gap (paired delta)")
 
     fig.suptitle(
-        "T1 transferability ablation: mean-only NULL vs PILSD-shrunk "
+        "T1 transferability ablation: mean-only NULL vs PEBS-shrunk "
         f"(PRISM k=5 CV, n_users={len(pu_aligned)}, cluster-bootstrap 2000 reps)",
         fontsize=12,
     )
@@ -490,23 +490,23 @@ def main():
     wA, wB = worst_cell_name.split("__to__")
 
     tex = rf"""% PAPER_INSERT_mean_only_null.tex
-% Auto-generated by scripts/t1_mean_only_transferability_null.py (iter+N+253).
-\paragraph{{Attack B --- "is the transferable object just per-user bias?"}}
-A hostile reviewer (iter+N+253) observed that our $0.91$
+% Auto-generated by scripts/t1_mean_only_transferability_null.py.
+\paragraph{{Null check --- "is the transferable object just per-user bias?"}}
+One could observe that our $0.91$
 cross-backbone transfer ratio depends on per-backbone $z$-scoring, and
-conjectured that the object which transfers is merely the per-user
+conjecture that the object which transfers is merely the per-user
 intercept $\alpha_j$ rather than the full shrunk $(\alpha_j, \beta_j)$
 calibrator. We test this directly with a mean-only NULL that fixes
 $\beta = 1$ in standardized units and carries only $\alpha_j$ across
 backbones:
 $\hat{{y}}_B = \alpha_j^A + 1 \cdot z_B(x_B)$. On PRISM's $3{{\times}}3$
 transferability matrix ($n=1394$ held-in users, $5$-fold CV, same
-splits and same $68{{,}}371$-utterance inner join as iter+N+236),
+splits and same $68{{,}}371$-utterance inner join as the original run),
 the mean-only NULL achieves an off-diagonal transfer ratio of
 $\mathbf{{{mean_ratio_off:.3f}}}$ (best-transfer/within $={mean_best_over_within_mo:.3f}$)
-against the PILSD-shrunk off-diagonal ratio of $0.910$
+against the PEBS-shrunk off-diagonal ratio of $0.910$
 (best-transfer/within $={mean_best_over_within_pi:.3f}$).
-The paired per-user gap (PILSD $-$ mean-only, $95\%$ cluster bootstrap
+The paired per-user gap (PEBS $-$ mean-only, $95\%$ cluster bootstrap
 over users, $2000$ reps, seed $=20260420$) ranges over the nine cells
 with extreme cell $({wA}{{\to}}{wB})$: gap $={wc['gap_pct']:+.2f}\%$
 $[{wc['gap_ci95'][0]:+.2f}, {wc['gap_ci95'][1]:+.2f}]$.

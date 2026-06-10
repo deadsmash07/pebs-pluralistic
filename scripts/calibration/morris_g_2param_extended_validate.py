@@ -1,20 +1,20 @@
 #!/usr/bin/env python3
-"""iter+N+279 — Morris g 2-parameter forecast validated on 2 additional corpora.
+"""Morris g 2-parameter forecast validated on 2 additional corpora.
 
-ADVERSARIAL ATTACK (iter+N+278 subagent a5f098d8):
-  iter+N+270 reports 2-param g(r_alpha, r_beta) = 17.96% vs MultiPref
+CONCERN:
+  The 2-param fit (morris_g_2param_validate.py) reports g(r_alpha, r_beta) = 17.96% vs MultiPref
   observed 0.47% — miss unchanged from 1-param's 17.7pp gap. Paper
   concedes "predicted risk-gap > total POP residual" — inconsistency.
   Claim "Morris g is a validated forecasting tool" rests on only 2
   corpora (PRISM, PluriHarms) — under-powered for a "validated" label.
 
-CLOSURE:
+RESOLUTION:
   Add 2 new real corpora to the forecasting test:
-    (i)  OASST2 author-rank (from 3_PILSD_Standalone/data/oasst2_author_quality.parquet)
-    (ii) SHP domain-subreddit (from 3_PILSD_Standalone/data/shp_domain_quality.parquet)
+    (i)  OASST2 author-rank (from 3_PEBS_Standalone/data/oasst2_author_quality.parquet)
+    (ii) SHP domain-subreddit (from 3_PEBS_Standalone/data/shp_domain_quality.parquet)
   Fit MoM (tau^2_alpha, tau^2_beta, sigma^2_eps) and compute 2-param forecast.
-  Compare predicted vs observed PILSD gain from published iter+N+199/201
-  (OASST) and iter+N+272 (SHP) runs where available.
+  Compare predicted vs observed PEBS gain from the earlier OASST and SHP
+  runs where available.
 
   If 2/2 new corpora are within 5 pp of observed: forecasting-tool framing
   survives with scope clause "works on rating corpora with continuous y
@@ -55,7 +55,7 @@ def load_oasst2(path: str):
 def load_shp(path: str):
     """SHP — user_id is the SUBREDDIT (18 subreddits, each with thousands
     of obs). Stratifying by subreddit mirrors the MULTI-USER RE structure
-    that PILSD models (within-community heterogeneity as proxy for
+    that PEBS models (within-community heterogeneity as proxy for
     within-user).
     y = quality = log(winner_score), x = log_score_ratio.
     """
@@ -68,16 +68,16 @@ def load_shp(path: str):
 def parse_args():
     p = argparse.ArgumentParser()
     p.add_argument("--oasst2-parquet",
-                   default="../3_PILSD_Standalone/data/oasst2_author_quality.parquet")
+                   default="../3_PEBS_Standalone/data/oasst2_author_quality.parquet")
     p.add_argument("--shp-parquet",
-                   default="../3_PILSD_Standalone/data/shp_domain_quality.parquet")
+                   default="../3_PEBS_Standalone/data/shp_domain_quality.parquet")
     p.add_argument("--output-dir",
                    default="results/track1_morris_g_extended")
-    # Observed PILSD gains: from iter+N+199/201 (OASST robust M-estimators)
+    # Observed PEBS gains: from the OASST robust M-estimator runs
     # OASST union drift β̂ measures a DIFFERENT quantity (drift coef).
-    # For this closure, we compute the PILSD relative-RMSE gain on
+    # For this closure, we compute the PEBS relative-RMSE gain on
     # oasst2_author_quality using the SAME protocol as morris_g_2param_validate:
-    # per-user CV rel-RMSE(PILSD) vs rel-RMSE(POP). If the PILSD gain hasn't
+    # per-user CV rel-RMSE(PEBS) vs rel-RMSE(POP). If the PEBS gain hasn't
     # been run on OASST2/SHP before, we compute it here (leave-one-out
     # per-user CV), so the 'observed' column is a deterministic function
     # of the data + the same EB formula that morris_g uses.
@@ -85,25 +85,25 @@ def parse_args():
     return p.parse_args()
 
 
-def compute_pilsd_gain_loo_cv(df: pd.DataFrame,
+def compute_pebs_gain_loo_cv(df: pd.DataFrame,
                                y_col: str, x_col: str,
                                user_col: str = "user_id",
                                min_obs: int = 5) -> float:
-    """Empirical PILSD relative-RMSE gain via leave-one-row-out CV.
+    """Empirical PEBS relative-RMSE gain via leave-one-row-out CV.
 
     For each held-out row (i, j):
       y_hat_POP    = alpha_pop + beta_pop * x_ij        (full-data POP)
-      y_hat_PILSD  = alpha_j^EB + beta_j^EB * x_ij      (per-user EB fit on
+      y_hat_PEBS  = alpha_j^EB + beta_j^EB * x_ij      (per-user EB fit on
                                                          the REMAINING n_j-1
                                                          rows, shrunk toward
                                                          (alpha_pop,beta_pop)
                                                          via omega_j)
-    Then rel_gain = 1 - sqrt(SSE_PILSD / SSE_POP).
+    Then rel_gain = 1 - sqrt(SSE_PEBS / SSE_POP).
 
     Uses the SAME MoM tau^2_alpha, tau^2_beta, sigma^2_eps from fit_two_param
     on the FULL dataset (hold-out-one shrinkage parameters are not
-    re-estimated per fold — this mirrors iter+N+265 and the paper's standard
-    PILSD evaluation protocol where (tau, sigma) are global MoM estimates).
+    re-estimated per fold — this mirrors morris_g_validate.py and the paper's standard
+    PEBS evaluation protocol where (tau, sigma) are global MoM estimates).
 
     Runtime: vectorized per user; O(sum_j n_j) = O(n_total).
     """
@@ -133,7 +133,7 @@ def compute_pilsd_gain_loo_cv(df: pd.DataFrame,
     #   b_j' = Sxy_c' / Sxx_c'
     #   varx_within' = Sxx_c' / ni'
     sse_pop = 0.0
-    sse_pilsd = 0.0
+    sse_pebs = 0.0
     n_total_folds = 0
     for uid, grp in df.groupby(user_col, sort=False):
         n = len(grp)
@@ -174,24 +174,24 @@ def compute_pilsd_gain_loo_cv(df: pd.DataFrame,
         a_within_eb = omega_a * ybar_i + (1.0 - omega_a) * a_within_pop
         b_eb = omega_b * b_ji + (1.0 - omega_b) * beta_pop
         # Prediction at held-out x[i], centred at LOO xbar_i
-        y_hat_pilsd = a_within_eb + b_eb * (x - xbar_i)
-        resid_pilsd = y - y_hat_pilsd
+        y_hat_pebs = a_within_eb + b_eb * (x - xbar_i)
+        resid_pebs = y - y_hat_pebs
         sse_pop += float((resid_pop[mask] ** 2).sum())
-        sse_pilsd += float((resid_pilsd[mask] ** 2).sum())
+        sse_pebs += float((resid_pebs[mask] ** 2).sum())
         n_total_folds += int(mask.sum())
     if n_total_folds == 0 or sse_pop <= 0:
         return float("nan")
     rmse_pop = np.sqrt(sse_pop / n_total_folds)
-    rmse_pilsd = np.sqrt(sse_pilsd / n_total_folds)
-    return 100.0 * (1.0 - rmse_pilsd / rmse_pop)
+    rmse_pebs = np.sqrt(sse_pebs / n_total_folds)
+    return 100.0 * (1.0 - rmse_pebs / rmse_pop)
 
 
 # Kept for back-compat; delegates to the real LOO CV.
-def compute_pilsd_gain_from_fit(fit: dict, df: pd.DataFrame,
+def compute_pebs_gain_from_fit(fit: dict, df: pd.DataFrame,
                                  y_col: str, x_col: str,
                                  user_col: str = "user_id",
                                  min_obs: int = 5) -> float:
-    return compute_pilsd_gain_loo_cv(df, y_col, x_col, user_col, min_obs)
+    return compute_pebs_gain_loo_cv(df, y_col, x_col, user_col, min_obs)
 
 
 def main():
@@ -223,9 +223,9 @@ def main():
             fit = fit_two_param(df, y_col, x_col,
                                 user_col="user_id", min_obs=min_obs)
             pred = predict_2param(fit)
-            # Compute "observed" PILSD gain via same-data ratio-form MSE
+            # Compute "observed" PEBS gain via same-data ratio-form MSE
             # (matches morris_g_2param_validate's metric).
-            observed_pct = compute_pilsd_gain_from_fit(
+            observed_pct = compute_pebs_gain_from_fit(
                 fit, df, y_col, x_col, user_col="user_id", min_obs=min_obs,
             )
             pred_1p = pred["rel_imp_pct_1param_ref"]
@@ -283,7 +283,7 @@ def main():
 
     if total_ok == 0:
         verdict = "UNABLE_TO_EVALUATE"
-        verdict_note = "Both new corpora errored — cannot close attack."
+        verdict_note = "Both new corpora errored — cannot resolve the concern."
     elif within_5pp == total_ok:
         verdict = "FORECASTING_TOOL_SURVIVES"
         verdict_note = (f"{within_5pp}/{total_ok} new corpora within 5pp; "
@@ -303,8 +303,7 @@ def main():
                         "claim forecasting.")
 
     out = {
-        "iter": "iter+N+279_adv_morris_g_extended",
-        "attack": "NEW-3 Morris g 2-param misses MultiPref by 17.49pp",
+        "concern": "Morris g 2-param misses MultiPref by 17.49pp",
         "n_corpora_tested": total_ok,
         "n_corpora_within_5pp": within_5pp,
         "n_corpora_within_10pp": within_10pp,

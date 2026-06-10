@@ -1,7 +1,7 @@
-"""LoRe-slice pair-accuracy head-to-head: PILSD vs EBPO vs LoRe (iter+N+261).
+"""LoRe-slice pair-accuracy head-to-head: PEBS vs EBPO vs LoRe.
 
-Closes reviewer attack: "on LoRe's own slice with LoRe's metric, LoRe would beat you."
-Inverts iter+N+239 neighbor head-to-head (OUR slice + OUR metric = RMSE) by using
+Tests the natural objection: "on LoRe's own slice with LoRe's metric, LoRe would win."
+Inverts the earlier neighbor head-to-head (OUR slice + OUR metric = RMSE) by using
 LoRe's own slice definition and their pair-accuracy metric (Eq. 20 of arxiv:2504.14439).
 
 LoRe's PRISM slice (from Bose et al. 2025, §5):
@@ -16,7 +16,7 @@ LoRe's PRISM slice (from Bose et al. 2025, §5):
   - LoRe reports 71.0 +/- 0.8 Overall (seen+unseen), BT=62.5, PAL=64.92, VPL=61.4.
 
 Three methods on this slice:
-  1. PILSD-shrunk: per-user EB-shrunk (alpha_j, beta_j) affine calibrator of the
+  1. PEBS-shrunk: per-user EB-shrunk (alpha_j, beta_j) affine calibrator of the
      scalar RM score, with MoM tau^2 estimates. Pair-prediction:
      I[alpha_j + beta_j * rm(x,y_c) > alpha_j + beta_j * rm(x,y_r)]
      = I[beta_j * (rm_c - rm_r) > 0].
@@ -51,7 +51,7 @@ Caveats (honest disclosure):
   - EBPO's slope is not per-user by design. Its pair-acc on a scalar RM
     therefore coincides with the population BT (pop-slope) model's pair-acc
     on pure ordering. This is not a weakness of our reimplementation; it is
-    the EBPO paper's scope (slope shrinkage is PILSD's extension).
+    the EBPO paper's scope (slope shrinkage is PEBS's extension).
 
 Outputs:
   results/track1_lore_slice_pair_acc/summary.json
@@ -136,7 +136,7 @@ def split_train_test(pairs: pd.DataFrame, rng: np.random.Generator):
 
 
 # ======================================================================
-# Method 1: PILSD-shrunk
+# Method 1: PEBS-shrunk
 # ======================================================================
 
 def fit_user_ols(df_user: pd.DataFrame):
@@ -165,7 +165,7 @@ def fit_user_ols(df_user: pd.DataFrame):
     return alpha, beta, se_alpha, se_beta
 
 
-def pilsd_fit_slice(train_df: pd.DataFrame):
+def pebs_fit_slice(train_df: pd.DataFrame):
     """Fit per-user OLS + population prior + MoM tau^2 on the train half."""
     # Population OLS (pool all utterance-level obs)
     rm_all = np.concatenate([train_df["rm_chosen"].to_numpy(dtype=np.float64),
@@ -205,8 +205,8 @@ def pilsd_fit_slice(train_df: pd.DataFrame):
             "tau2_a": tau2_a, "tau2_b": tau2_b}
 
 
-def pilsd_pair_acc_per_user(test_df: pd.DataFrame, fit: dict):
-    """Per-user pair accuracy under PILSD shrunk affine calibration."""
+def pebs_pair_acc_per_user(test_df: pd.DataFrame, fit: dict):
+    """Per-user pair accuracy under PEBS shrunk affine calibration."""
     out = {}
     for u, g in test_df.groupby("user_id", sort=False):
         a, b = fit["shrunk"].get(u, (fit["alpha_pop"], fit["beta_pop"]))
@@ -227,7 +227,7 @@ def ebpo_pair_acc_per_user(test_df: pd.DataFrame, train_df: pd.DataFrame):
     So EBPO's pair-acc here equals that of the population-slope model. This
     is honest: EBPO is designed for mean/intercept calibration (per-prompt
     baselines V_q^EB in RLVR), and its algorithmic footprint does NOT carry
-    slope information -- slope shrinkage is PILSD's extension.
+    slope information -- slope shrinkage is PEBS's extension.
     """
     # Just use population slope sign on RM margin
     rm_all = np.concatenate([train_df["rm_chosen"].to_numpy(dtype=np.float64),
@@ -479,11 +479,11 @@ def main():
           f"test users: {test_df['user_id'].nunique()}")
 
     # Fit methods on train half
-    print("[pilsd] fitting per-user EB calibrators ...")
-    pilsd_fit = pilsd_fit_slice(train_df)
-    print(f"[pilsd] alpha_pop={pilsd_fit['alpha_pop']:.4f} "
-          f"beta_pop={pilsd_fit['beta_pop']:.4f} "
-          f"tau2_a={pilsd_fit['tau2_a']:.3f} tau2_b={pilsd_fit['tau2_b']:.5f}")
+    print("[pebs] fitting per-user EB calibrators ...")
+    pebs_fit = pebs_fit_slice(train_df)
+    print(f"[pebs] alpha_pop={pebs_fit['alpha_pop']:.4f} "
+          f"beta_pop={pebs_fit['beta_pop']:.4f} "
+          f"tau2_a={pebs_fit['tau2_a']:.3f} tau2_b={pebs_fit['tau2_b']:.5f}")
 
     print("[lore] fitting basis + simplex weights ...")
     lore_fit = lore_fit_slice(train_df, B=args.basis_B, seed=args.seed)
@@ -492,27 +492,27 @@ def main():
     print(f"[lore]  mean w = {w_mean.round(3)}")
 
     # Score pair-accuracy per user on test half
-    pilsd_acc = pilsd_pair_acc_per_user(test_df, pilsd_fit)
+    pebs_acc = pebs_pair_acc_per_user(test_df, pebs_fit)
     ebpo_acc = ebpo_pair_acc_per_user(test_df, train_df)
     lore_acc = lore_pair_acc_per_user(test_df, lore_fit)
 
     # Cluster-bootstrap 95% CI
-    pilsd_boot = cluster_boot_ci(pilsd_acc, args.n_boot, args.seed)
+    pebs_boot = cluster_boot_ci(pebs_acc, args.n_boot, args.seed)
     ebpo_boot = cluster_boot_ci(ebpo_acc, args.n_boot, args.seed + 1)
     lore_boot = cluster_boot_ci(lore_acc, args.n_boot, args.seed + 2)
 
     # Paired Wilcoxon
-    w_pilsd_lore = paired_wilcoxon(pilsd_acc, lore_acc)
-    w_pilsd_ebpo = paired_wilcoxon(pilsd_acc, ebpo_acc)
+    w_pebs_lore = paired_wilcoxon(pebs_acc, lore_acc)
+    w_pebs_ebpo = paired_wilcoxon(pebs_acc, ebpo_acc)
     w_lore_ebpo = paired_wilcoxon(lore_acc, ebpo_acc)
 
     # Verdict
     def overlap(a, b):
         return not (a["ci95"][1] < b["ci95"][0] or b["ci95"][1] < a["ci95"][0])
 
-    if pilsd_boot["mean"] >= lore_boot["mean"] and (not overlap(pilsd_boot, lore_boot)):
-        verdict = "PILSD_WIN"
-    elif lore_boot["mean"] > pilsd_boot["mean"] and (not overlap(lore_boot, pilsd_boot)):
+    if pebs_boot["mean"] >= lore_boot["mean"] and (not overlap(pebs_boot, lore_boot)):
+        verdict = "PEBS_WIN"
+    elif lore_boot["mean"] > pebs_boot["mean"] and (not overlap(lore_boot, pebs_boot)):
         verdict = "LORE_WIN"
     else:
         verdict = "TIE"
@@ -538,10 +538,10 @@ def main():
             ),
         },
         "arms": {
-            "pilsd": {
-                "pair_acc": pilsd_boot["mean"],
-                "ci95": pilsd_boot["ci95"],
-                "se": pilsd_boot["se"],
+            "pebs": {
+                "pair_acc": pebs_boot["mean"],
+                "ci95": pebs_boot["ci95"],
+                "se": pebs_boot["se"],
             },
             "ebpo": {
                 "pair_acc": ebpo_boot["mean"],
@@ -555,8 +555,8 @@ def main():
             },
         },
         "paired_wilcoxon": {
-            "pilsd_vs_lore": w_pilsd_lore,
-            "pilsd_vs_ebpo": w_pilsd_ebpo,
+            "pebs_vs_lore": w_pebs_lore,
+            "pebs_vs_ebpo": w_pebs_ebpo,
             "lore_vs_ebpo": w_lore_ebpo,
         },
         "verdict": verdict,
@@ -577,22 +577,22 @@ def main():
     (OUT_RESULTS / "summary.json").write_text(json.dumps(summary, indent=2))
 
     # Per-user table
-    common_users = sorted(set(pilsd_acc) | set(ebpo_acc) | set(lore_acc))
+    common_users = sorted(set(pebs_acc) | set(ebpo_acc) | set(lore_acc))
     per_user = pd.DataFrame({
         "user_id": common_users,
-        "pilsd_pair_acc": [pilsd_acc.get(u, np.nan) for u in common_users],
+        "pebs_pair_acc": [pebs_acc.get(u, np.nan) for u in common_users],
         "ebpo_pair_acc": [ebpo_acc.get(u, np.nan) for u in common_users],
         "lore_pair_acc": [lore_acc.get(u, np.nan) for u in common_users],
     })
     per_user.to_parquet(OUT_RESULTS / "per_user.parquet", index=False)
 
     # Pretty print
-    print(f"\n=== LoRe-slice pair-accuracy head-to-head (iter+N+261) ===")
+    print(f"\n=== LoRe-slice pair-accuracy head-to-head ===")
     print(f"slice: {summary['slice']['n_users']} users, "
           f"{summary['slice']['slice_total_pairs']} pairs "
           f"(train {summary['slice']['train_pairs']}, test {summary['slice']['test_pairs']})")
     print(f"{'method':>10s}  {'pair_acc':>9s}  {'95% CI':>22s}")
-    for arm in ["pilsd", "lore", "ebpo"]:
+    for arm in ["pebs", "lore", "ebpo"]:
         m = summary["arms"][arm]
         print(f"{arm:>10s}  {m['pair_acc']:9.4f}  "
               f"[{m['ci95'][0]:.4f}, {m['ci95'][1]:.4f}]")

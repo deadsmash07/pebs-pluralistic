@@ -1,6 +1,6 @@
-"""PluriHarms practical baselines head-to-head (iter+N+131).
+"""PluriHarms practical baselines head-to-head.
 
-Mirrors iter+N+124 PRISM practical-baselines battery on PluriHarms.
+Mirrors the PRISM practical-baselines battery on PluriHarms.
 Tests whether naive practitioner-alternative calibrations (z-score,
 min-max, quantile-match, residual-only, demographic-stratum) hurt
 or help on PluriHarms. Expected: partial similarity to PRISM but
@@ -14,7 +14,7 @@ Arms:
 4. Per-user quantile-match to pop CDF
 5. Per-user residual-only (β_j intercept only; slope fixed at pop)
 6. Demographic-stratum pop-slope (Gender)
-7. PILSD EB-shrunk (our method)
+7. PEBS EB-shrunk (our method)
 """
 
 from __future__ import annotations
@@ -151,7 +151,7 @@ def score_per_user_rmse(df_train, df_test, arm):
             pred = a * g["anchor_z"].values + b
             per_user_pred[uid] = pred
 
-    elif arm == "pilsd":
+    elif arm == "pebs":
         md = smf.mixedlm(
             "rating ~ anchor_z",
             data=df_train,
@@ -220,7 +220,7 @@ def main():
         for i, idx in enumerate(idxs):
             df.loc[idx, "fold"] = i % 5
 
-    arms = ["pop", "zscore", "minmax", "quantile", "residual", "demo_stratum", "pilsd"]
+    arms = ["pop", "zscore", "minmax", "quantile", "residual", "demo_stratum", "pebs"]
     per_user_rmse = {a: {} for a in arms}
 
     for k in range(5):
@@ -246,23 +246,23 @@ def main():
         summary[arm] = {"mean_rmse": mean_rmse, "rel_vs_pop_pct": rel, "n_users": int(len(user_means))}
         print(f"{arm:<16} {mean_rmse:<12.3f} {rel:+.2f}%")
 
-    # Wilcoxon PILSD vs each other arm
-    pilsd_user = np.array([np.mean(v) for v in per_user_rmse["pilsd"].values() if v])
-    pilsd_uids = [u for u in per_user_rmse["pilsd"] if per_user_rmse["pilsd"][u]]
+    # Wilcoxon PEBS vs each other arm
+    pebs_user = np.array([np.mean(v) for v in per_user_rmse["pebs"].values() if v])
+    pebs_uids = [u for u in per_user_rmse["pebs"] if per_user_rmse["pebs"][u]]
     for arm in arms:
-        if arm == "pilsd":
+        if arm == "pebs":
             continue
         a_user = np.array([
             np.mean(per_user_rmse[arm].get(u, [np.nan]))
-            for u in pilsd_uids
+            for u in pebs_uids
         ])
         mask = ~np.isnan(a_user)
         if mask.sum() < 2:
             continue
-        w = stats.wilcoxon(pilsd_user[mask], a_user[mask], alternative="less")
-        summary[f"wilcoxon_pilsd_vs_{arm}_p"] = float(w.pvalue)
-        summary[f"frac_pilsd_lt_{arm}"] = float((pilsd_user[mask] < a_user[mask]).mean())
-        print(f"  Wilcoxon PILSD < {arm}: p={w.pvalue:.3e}, frac_win={float((pilsd_user[mask] < a_user[mask]).mean()):.3f}")
+        w = stats.wilcoxon(pebs_user[mask], a_user[mask], alternative="less")
+        summary[f"wilcoxon_pebs_vs_{arm}_p"] = float(w.pvalue)
+        summary[f"frac_pebs_lt_{arm}"] = float((pebs_user[mask] < a_user[mask]).mean())
+        print(f"  Wilcoxon PEBS < {arm}: p={w.pvalue:.3e}, frac_win={float((pebs_user[mask] < a_user[mask]).mean()):.3f}")
 
     out = ROOT / "results" / "pluriharms_practical_baselines.json"
     out.write_text(json.dumps(summary, indent=2))

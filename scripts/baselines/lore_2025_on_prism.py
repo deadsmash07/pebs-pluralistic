@@ -2,8 +2,7 @@
 LOCO slice -- faithful re-implementation of the low-rank basis + per-user
 simplex-weight architecture (Eq. 7 + Eq. 10) adapted to scalar-RMSE evaluation.
 
-Reference (verified via Skill: paper-citation-integrity-audit 5-axis,
-2026-05-02 22:24 IST per memory/phase_h6_lore_dispatch_2026_05_02_2150_IST.md):
+Reference (verified against the published paper):
     LoRe: Personalizing LLMs via Low-Rank Reward Modeling.
     Authors: Avinandan Bose, Zhihan Xiong, Yuejie Chi, Simon Shaolei Du,
              Lin Xiao, Maryam Fazel.
@@ -37,7 +36,7 @@ Why a re-implementation rather than running Meta's checkpoint:
         we sweep B in {2, 4, 8, 16} per LoRe Tab. 6 ablation by appending
         higher-order polynomial bases.
     (c) LoRe's native metric is pair-accuracy via the BT margin sign. To
-        compare apples-to-apples with PILSD's per-user RMSE on PRISM
+        compare apples-to-apples with PEBS's per-user RMSE on PRISM
         score_user (continuous 0-100), we extract a SCALAR PER-RESPONSE
         prediction r_i(x, y) = w_i^T A phi(x) and apply per-user OLS
         rescale alpha_i + beta_i * r_i(x, y) using the user's TRAIN-half
@@ -52,7 +51,7 @@ substitutions):
        features phi(x) = [1, x_std, x_std^2, ...], giving a B-dim reward
        basis R_A(y) = A phi(x). On the LOCO splits, "training users" are
        all users (we use the same loco-fold-out user-conversation
-       hold-out as PILSD; see G2 below).
+       hold-out as PEBS; see below).
     B. SIMPLEX WEIGHTS w_i. Per-user weights via projected gradient descent
        on Delta^(B-1) (Wang & Carreira-Perpinan 2013 simplex projection,
        same as used in scripts/lore_slice_pair_acc_h2h.py lines 376-386).
@@ -67,7 +66,7 @@ substitutions):
             score_pred = alpha_i + beta_i * r_i(x, y)
        (alpha_i, beta_i) fit on the user's TRAIN-half (rm-features ->
        score_user) pairs ONLY (no test-half leakage). This is a fair
-       test-time calibration; we audit (G4) that the rescale does NOT
+       test-time calibration; we verify that the rescale does NOT
        trivially recover the population OLS by symmetry.
     E. B SWEEP. We report B in {2, 4, 8, 16} per LoRe Tab. 6; the B
        column reports per-fold per-user RMSE for each B. Default B
@@ -76,14 +75,14 @@ substitutions):
        (since highest-entropy weights = degenerate uniform; B=2 with
        diverse weights is preferred over B=16 with all-uniform).
 
-Honest scope caveats baked into the script (per Skill: honest-disclosure):
+Honest scope caveats baked into the script:
     1. LoRe's original embedding dim is 4096 (pre-final-layer Qwen-Instruct);
        our features are polynomial in scalar rm_score. This is a CONSERVATIVE
        reproduction -- LoRe's full embedding version could conceivably do
        better; our polynomial version still preserves the basis+simplex-
        weight architecture faithfully. Disclosed verbatim in paper Limitations.
     2. The §4.2 step D linear-rescale converts pair-margin to score-axis;
-       we audit (G4) on a held-out subset that the LoRe-rescaled prediction
+       we verify on a held-out subset that the LoRe-rescaled prediction
        is NOT trivially equal to population OLS (which would be the
        degenerate case where the basis collapses to scalar).
     3. Few-shot K. Paper §4.3 reports K=2/4/8 ratings per held-out user.
@@ -97,12 +96,12 @@ Honest scope caveats baked into the script (per Skill: honest-disclosure):
     5. NO architecture-side disablement bug. We assert B >= 2 produces
        non-trivial w_i (mean weight-entropy < log(B) - epsilon), assert
        R_phi is genuinely B-dim (rank A == B), and assert the rescale
-       does not collapse to population OLS (G4 sanity check).
+       does not collapse to population OLS (sanity check).
 
 Outputs (mirrors paper/scripts/baselines/p_genrm_2026_on_prism.py):
     results/track1_lore_h2h_rmse/summary.json    methods.{lore_B2, lore_B4,
                                                     lore_B8, lore_B16,
-                                                    pilsd_shrunk, pop_slope}
+                                                    pebs_shrunk, pop_slope}
     results/track1_lore_h2h_rmse/per_user.parquet  per-user RMSE rows
     paper/tables/lore_headtohead_rmse_numbers.tex
     paper/figures/fig_lore_headtohead_rmse.{pdf,png}
@@ -124,7 +123,7 @@ import matplotlib.pyplot as plt
 from tqdm import tqdm
 
 # Paths
-ROOT = Path(__file__).resolve().parents[3]   # 3_PILSD_Standalone/
+ROOT = Path(__file__).resolve().parents[3]   # 3_PEBS_Standalone/
 T1 = ROOT.parent / "1_Causal_RLHF"
 SCORED = T1 / "data/prism_rm_scored.parquet"
 
@@ -149,7 +148,7 @@ N_OUTER_DEFAULT = 3
 RIDGE_DEFAULT = 1e-2
 
 # ============================================================================
-# G1 helper -- exact OLS with SE so the audit can verify per-line math
+# Helper -- exact OLS with SE (per-line verifiable math)
 # ============================================================================
 
 def fit_ols_with_se(x: np.ndarray, y: np.ndarray):
@@ -172,7 +171,7 @@ def fit_ols_with_se(x: np.ndarray, y: np.ndarray):
 
 
 # ============================================================================
-# G1 / G5 -- LoRe core: simplex projection (Wang & Carreira-Perpinan 2013)
+# LoRe core: simplex projection (Wang & Carreira-Perpinan 2013)
 #                       reused verbatim from scripts/lore_slice_pair_acc_h2h.py
 # ============================================================================
 
@@ -195,7 +194,7 @@ def simplex_project(v: np.ndarray) -> np.ndarray:
 
 
 # ============================================================================
-# G1 / G5 -- LoRe core: polynomial featurisation phi(x) of dimension B
+# LoRe core: polynomial featurisation phi(x) of dimension B
 # ============================================================================
 
 def make_poly_basis(rm_train_all: np.ndarray, B: int):
@@ -220,7 +219,7 @@ def make_poly_basis(rm_train_all: np.ndarray, B: int):
 
 
 # ============================================================================
-# G1 / G5 -- LoRe joint optimisation (Eq. 10) via alternating min
+# LoRe joint optimisation (Eq. 10) via alternating min
 # ============================================================================
 
 def logistic_sigmoid_neg(margins: np.ndarray) -> np.ndarray:
@@ -350,7 +349,7 @@ def lore_fit(train_pairs: pd.DataFrame, B: int, seed: int,
 
 
 # ============================================================================
-# G1 / G2 / G4 -- LoRe scalar-RMSE bridge: per-user OLS rescale of LoRe-margin
+# LoRe scalar-RMSE bridge: per-user OLS rescale of LoRe-margin
 # ============================================================================
 
 def lore_predict_score(x_te_rm: np.ndarray, w_u: np.ndarray, A: np.ndarray,
@@ -370,10 +369,10 @@ def lore_predict_score(x_te_rm: np.ndarray, w_u: np.ndarray, A: np.ndarray,
 
 
 # ============================================================================
-# G1 / G5 -- PILSD-shrunk reference (mirrors scripts/neighbor_head_to_head.py)
+# PEBS-shrunk reference (mirrors scripts/neighbor_head_to_head.py)
 # ============================================================================
 
-def method_pilsd_shrunk(x_tr, y_tr, x_te, alpha_pop, beta_pop, tau2_a, tau2_b):
+def method_pebs_shrunk(x_tr, y_tr, x_te, alpha_pop, beta_pop, tau2_a, tau2_b):
     a, b, se_a, se_b = fit_ols_with_se(x_tr, y_tr)
     if not np.isfinite(a):
         return alpha_pop + beta_pop * x_te
@@ -385,7 +384,7 @@ def method_pilsd_shrunk(x_tr, y_tr, x_te, alpha_pop, beta_pop, tau2_a, tau2_b):
 
 
 # ============================================================================
-# G1 -- Build per-user pair table (within-conversation chosen x rejected)
+# Build per-user pair table (within-conversation chosen x rejected)
 # ============================================================================
 
 def build_pair_table(df: pd.DataFrame) -> pd.DataFrame:
@@ -412,7 +411,7 @@ def build_pair_table(df: pd.DataFrame) -> pd.DataFrame:
 
 
 # ============================================================================
-# G7 -- LOCO loop with diagnostic instrumentation
+# LOCO loop with diagnostic instrumentation
 # ============================================================================
 
 def run_loco(args):
@@ -449,13 +448,13 @@ def run_loco(args):
     print(f"[pairs]  {len(pairs_full)} chosen x rejected pairs across "
           f"{pairs_full['user_id'].nunique()} users")
 
-    # Cache the global x_mu, x_sd over ALL utterances so LoRe + PILSD use
-    # the same standardisation across folds (G8 reproducibility).
+    # Cache the global x_mu, x_sd over ALL utterances so LoRe + PEBS use
+    # the same standardisation across folds (reproducibility).
     rm_all = df["rm_score"].to_numpy(dtype=np.float64)
     x_mu_global = float(np.mean(rm_all))
     x_sd_global = float(np.std(rm_all) + 1e-8)
 
-    # PILSD MoM tau^2_a, tau^2_b (reference baseline) -- per-user OLS on
+    # PEBS MoM tau^2_a, tau^2_b (reference baseline) -- per-user OLS on
     # ALL utterances (matches P-GenRM reference, with TRAIN/test split done
     # inside the LOCO loop below)
     user_stats = []
@@ -469,14 +468,14 @@ def run_loco(args):
     sbs = np.array([s[3] for s in user_stats if np.isfinite(s[3])])
     tau2_a = max(0.0, float(np.var(alphas, ddof=1) - np.mean(sas ** 2)))
     tau2_b = max(0.0, float(np.var(betas, ddof=1) - np.mean(sbs ** 2)))
-    print(f"[pilsd]  tau2_a={tau2_a:.2f}  tau2_b={tau2_b:.4f}")
+    print(f"[pebs]  tau2_a={tau2_a:.2f}  tau2_b={tau2_b:.4f}")
 
     # ----------------------------------------------------------------------
     # LoRe joint training -- one global fit per B, on the ALL-USERS pair table.
     # Per-user w_i updates use only train-half conversations (we re-fit w_i
     # within the LOCO loop inside test prediction); shared A is fit once.
     # ----------------------------------------------------------------------
-    method_names = ["pop_slope", "pilsd_shrunk"] + [f"lore_B{B}" for B in args.b_grid]
+    method_names = ["pop_slope", "pebs_shrunk"] + [f"lore_B{B}" for B in args.b_grid]
 
     # For each B: fit A globally on ALL pairs (no test pairs are present in
     # train_pairs because the rescale uses utterance-level test rows that
@@ -511,7 +510,7 @@ def run_loco(args):
         rank_A = int(np.linalg.matrix_rank(fit["A"]))
         print(f"[lore B={B}]   W entropy mean={ent_mean:.4f} (max log{B}={max_ent:.4f})  "
               f"var={ent_var:.6f}  rank(A)={rank_A}")
-        # G2/G11 anomaly: simplex collapse to uniform
+        # Anomaly: simplex collapse to uniform
         if (max_ent - ent_mean) < 1e-3 and B >= 2:
             print(f"[lore B={B}] WARN: simplex weights ~uniform across users; "
                    "B>=2 may not be exercising basis differentiation.")
@@ -523,7 +522,7 @@ def run_loco(args):
 
     # ----------------------------------------------------------------------
     # LOCO loop: for each user, hold out one conversation at a time, refit
-    # PILSD-shrunk and LoRe rescale (alpha_i, beta_i) on TRAIN-half only
+    # PEBS-shrunk and LoRe rescale (alpha_i, beta_i) on TRAIN-half only
     # ----------------------------------------------------------------------
     df_indexed = df.set_index("user_id")
     per_user_rows = []
@@ -547,10 +546,10 @@ def run_loco(args):
             x_te = te["rm_score"].to_numpy(dtype=np.float64)
             y_te = te["score_user"].to_numpy(dtype=np.float64)
 
-            # PILSD + pop_slope
+            # PEBS + pop_slope
             preds = {
                 "pop_slope": alpha_pop + beta_pop * x_te,
-                "pilsd_shrunk": method_pilsd_shrunk(x_tr, y_tr, x_te,
+                "pebs_shrunk": method_pebs_shrunk(x_tr, y_tr, x_te,
                                                      alpha_pop, beta_pop,
                                                      tau2_a, tau2_b),
             }
@@ -703,25 +702,25 @@ def run_loco(args):
         print(f"{m:>20s}  {pu[f'rmse_{m}'].mean():8.3f}  "
               f"{mean_g:+9.3f}  [{lo:+6.3f}, {hi:+6.3f}]")
 
-    # Paired delta vs PILSD-shrunk
-    pilsd_gain = pu["gain_pilsd_shrunk_pct"].to_numpy()
-    summary["paired_vs_pilsd"] = {}
+    # Paired delta vs PEBS-shrunk
+    pebs_gain = pu["gain_pebs_shrunk_pct"].to_numpy()
+    summary["paired_vs_pebs"] = {}
     for m in method_names:
-        if m in ("pop_slope", "pilsd_shrunk"):
+        if m in ("pop_slope", "pebs_shrunk"):
             continue
-        diff = pilsd_gain - pu[f"gain_{m}_pct"].to_numpy()
+        diff = pebs_gain - pu[f"gain_{m}_pct"].to_numpy()
         md, lo, hi, se = cluster_boot_ci(diff, args.n_boot, args.seed + 1)
-        summary["paired_vs_pilsd"][m] = {
+        summary["paired_vs_pebs"][m] = {
             "mean_delta_pct": md, "ci95": [lo, hi], "se": se,
-            "pilsd_better": bool(lo > 0),
+            "pebs_better": bool(lo > 0),
         }
         sig = "*" if lo > 0 or hi < 0 else ""
-        print(f"  PILSD - {m:>16s}: {md:+.3f}%  CI [{lo:+.3f}, {hi:+.3f}] {sig}")
+        print(f"  PEBS - {m:>16s}: {md:+.3f}%  CI [{lo:+.3f}, {hi:+.3f}] {sig}")
 
-    # G4 sanity check: assert LoRe predictions != population OLS
+    # Sanity check: assert LoRe predictions != population OLS
     # (would indicate degenerate basis-collapse / rescale-degeneracy)
     sample_user = pu["user_id"].iloc[0] if len(pu) > 0 else None
-    g4_note = "G4 rescale-degeneracy check: per-user LoRe RMSE differs from pop_slope RMSE"
+    g4_note = "rescale-degeneracy check: per-user LoRe RMSE differs from pop_slope RMSE"
     if sample_user is not None:
         for B in args.b_grid:
             r_lore_B = pu.loc[pu["user_id"] == sample_user, f"rmse_lore_B{B}"].iloc[0]
@@ -733,26 +732,26 @@ def run_loco(args):
                 )
     summary["g4_check"] = g4_note
 
-    # G12 honest-disclosure verdict assignment per 4-class STRICT vocabulary
-    pilsd_g_lo = summary["methods"]["pilsd_shrunk"]["rmse_reduction_pct_ci95"][0]
-    pilsd_dom_all = all(
-        summary["paired_vs_pilsd"][m]["pilsd_better"]
-        for m in summary["paired_vs_pilsd"]
+    # Outcome assignment
+    pebs_g_lo = summary["methods"]["pebs_shrunk"]["rmse_reduction_pct_ci95"][0]
+    pebs_dom_all = all(
+        summary["paired_vs_pebs"][m]["pebs_better"]
+        for m in summary["paired_vs_pebs"]
     )
-    pilsd_loses_all = all(
-        summary["paired_vs_pilsd"][m]["ci95"][1] < 0
-        for m in summary["paired_vs_pilsd"]
+    pebs_loses_all = all(
+        summary["paired_vs_pebs"][m]["ci95"][1] < 0
+        for m in summary["paired_vs_pebs"]
     )
-    if pilsd_g_lo > 0 and pilsd_dom_all:
-        summary["verdict_class"] = "ESTABLISHED-PILSD-RMSE-DOMINANCE"
-    elif pilsd_g_lo > 0 and not pilsd_dom_all and not pilsd_loses_all:
-        summary["verdict_class"] = "MODERATE-PILSD-GAIN-PARITY-WITH-LORE"
-    elif pilsd_g_lo > 0 and pilsd_loses_all:
-        summary["verdict_class"] = "MODERATE-LORE-RMSE-DOMINANCE"
-    elif pilsd_g_lo <= 0 and pilsd_loses_all:
-        summary["verdict_class"] = "FALSIFIED-PILSD-LOSES-TO-LORE"
+    if pebs_g_lo > 0 and pebs_dom_all:
+        summary["verdict_class"] = "CONFIRMED-PEBS-RMSE-DOMINANCE"
+    elif pebs_g_lo > 0 and not pebs_dom_all and not pebs_loses_all:
+        summary["verdict_class"] = "PARTIAL-PEBS-GAIN-PARITY-WITH-LORE"
+    elif pebs_g_lo > 0 and pebs_loses_all:
+        summary["verdict_class"] = "PARTIAL-LORE-RMSE-DOMINANCE"
+    elif pebs_g_lo <= 0 and pebs_loses_all:
+        summary["verdict_class"] = "REJECTED-PEBS-LOSES-TO-LORE"
     else:
-        summary["verdict_class"] = "PRELIMINARY-INCONCLUSIVE-LORE-H2H"
+        summary["verdict_class"] = "TENTATIVE-INCONCLUSIVE-LORE-H2H"
 
     summary["runtime_seconds"] = float(time.time() - t0)
 
@@ -769,7 +768,7 @@ def run_loco(args):
 
 def write_latex_table(summary: dict, out_path: Path, b_grid: tuple):
     pretty = {
-        "pilsd_shrunk": ("\\PILSD{} \\emph{(ours)}",
+        "pebs_shrunk": ("\\PEBS{} \\emph{(ours)}",
                           "Per-user EB-shrunk $(\\alpha_j, \\beta_j)$ affine calibrator",
                           "hierarchical EB"),
     }
@@ -779,7 +778,7 @@ def write_latex_table(summary: dict, out_path: Path, b_grid: tuple):
             f"Low-rank basis $R_\\phi: \\mathbb{{R}} \\to \\mathbb{{R}}^{{{B}}}$, simplex weights $w_i \\in \\Delta^{{{B-1}}}$, OLS rescale",
             f"low-rank B={B}",
         )
-    order = ["pilsd_shrunk"] + [f"lore_B{B}" for B in b_grid]
+    order = ["pebs_shrunk"] + [f"lore_B{B}" for B in b_grid]
     lines = []
     lines.append("% LoRe (Bose et al. 2025, Meta) head-to-head on PRISM (scalar-RMSE bridge).")
     lines.append("% Generated by paper/scripts/baselines/lore_2025_on_prism.py")
@@ -820,7 +819,7 @@ def write_latex_table(summary: dict, out_path: Path, b_grid: tuple):
         meth = summary['methods'][m]
         g = meth['rmse_reduction_pct_mean']
         ci = meth['rmse_reduction_pct_ci95']
-        g_s = f"\\textbf{{{g:+.2f}}}" if m == "pilsd_shrunk" else f"{g:+.2f}"
+        g_s = f"\\textbf{{{g:+.2f}}}" if m == "pebs_shrunk" else f"{g:+.2f}"
         ci_s = f"[{ci[0]:+.2f}, {ci[1]:+.2f}]"
         lines.append(f"{pretty_name} & {recipe} & {tag} & {g_s} & {ci_s} \\\\")
     lines.append("\\bottomrule")
@@ -833,10 +832,10 @@ def write_latex_table(summary: dict, out_path: Path, b_grid: tuple):
 
 
 def write_figure(summary: dict, out_path: Path, b_grid: tuple):
-    pretty = {"pilsd_shrunk": "PILSD (ours)"}
+    pretty = {"pebs_shrunk": "PEBS (ours)"}
     for B in b_grid:
         pretty[f"lore_B{B}"] = f"LoRe B={B}"
-    order = ["pilsd_shrunk"] + [f"lore_B{B}" for B in b_grid]
+    order = ["pebs_shrunk"] + [f"lore_B{B}" for B in b_grid]
     palette = ["#1f77b4", "#aec7e8", "#ff9896", "#d62728", "#9467bd"]
     colors = {m: palette[i % len(palette)] for i, m in enumerate(order)}
     means = [summary['methods'][m]['rmse_reduction_pct_mean'] for m in order]
@@ -855,7 +854,7 @@ def write_figure(summary: dict, out_path: Path, b_grid: tuple):
         va = "bottom" if mval >= 0 else "top"
         ax.text(b.get_x() + b.get_width() / 2, label_y, f"{mval:+.2f}%",
                  ha="center", va=va, fontsize=10,
-                 fontweight="bold" if order[i] == "pilsd_shrunk" else "normal")
+                 fontweight="bold" if order[i] == "pebs_shrunk" else "normal")
     ax.axhline(0, color="gray", lw=0.7, ls="--")
     ax.set_xticks(x)
     ax.set_xticklabels([pretty[m] for m in order], rotation=0, fontsize=10)

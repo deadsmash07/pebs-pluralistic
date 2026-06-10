@@ -1,35 +1,33 @@
 """Q4 — PReF + LoRe full 4096-D embedding sweep on PRISM LOCO.
 
-Mission (per memory/p0_experiment_queue_v1_2026_05_03.md Q4): close the
-audit-flagged polynomial-basis pathology disclosure where LoRe B=8 RMSE
+Mission: resolve the polynomial-basis pathology where LoRe B=8 RMSE
 blew up to 73.86 and B=16 to 4.25e6 because the existing baselines used
 a polynomial-basis substitution (phi(x) = [1, z, z^2, ..., z^{B-1}] on
 the scalar Qwen2.5-7B rm_score) instead of the 4096-D pre-final-layer
 embeddings the published methods actually use.
 
-Hypothesis: PILSD's RMSE dominance over PReF + LoRe persists when those
+Hypothesis: PEBS's RMSE dominance over PReF + LoRe persists when those
 baselines use their published-protocol pre-final-layer hidden-state
 embeddings rather than our polynomial-basis substitution.
 
-Decision rule (4-class STRICT per Skill: honest-disclosure §4):
-  ESTABLISHED-PILSD-RMSE-DOMINATES-PREF-LORE-LARGE-EMBEDDING
-      iff PILSD margin >= 3pp over best PReF and best LoRe
+Decision rule:
+  CONFIRMED-PEBS-RMSE-DOMINATES-PREF-LORE-LARGE-EMBEDDING
+      iff PEBS margin >= 3pp over best PReF and best LoRe
       AND CI strictly excludes 0
-  MODERATE-PILSD-MARGIN-SHRINKS
-      iff margin < 3pp but PILSD still wins (CI > 0)
-  PRELIMINARY-INCONCLUSIVE
+  PARTIAL-PEBS-MARGIN-SHRINKS
+      iff margin < 3pp but PEBS still wins (CI > 0)
+  TENTATIVE-INCONCLUSIVE
       iff CI straddles 0
-  FALSIFIED-PILSD-LOSES-WITH-LARGE-EMBEDDING
-      iff any PReF or LoRe variant >= PILSD (paired CI < 0)
+  REJECTED-PEBS-LOSES-WITH-LARGE-EMBEDDING
+      iff any PReF or LoRe variant >= PEBS (paired CI < 0)
 
-Data anchor: same 1394-user PRISM-LOCO split as the canonical PILSD
+Data anchor: same 1394-user PRISM-LOCO split as the canonical PEBS
 result (results/track1_pair_accuracy_comparison/summary.json shows
 n_users=1394 with the 5-fold-LOCO split derived from the
 MIN_CONV_PER_USER=2 / MIN_UTT_PER_USER=10 filter on
 data/prism_rm_scored.parquet; we apply the same filter here).
 
-Reference protocols (verified via Skill: paper-citation-integrity-audit
-2026-05-02):
+Reference protocols (verified against the cited papers):
   PReF (Shenfeld et al. 2025, arXiv:2503.06358) — paper Sec. 3 Eq. 3-5:
       phi : (x, y) -> R^J   "neural network that gets a concatenation
                               of the prompt x and response y as input
@@ -48,13 +46,12 @@ Reference protocols (verified via Skill: paper-citation-integrity-audit
       Adaptation: same Qwen2.5-7B-Instruct pooled hidden state -> top-B
       PCA projection. Frozen R_phi during per-user w_i refit; A is
       identity (we keep the polynomial-basis script's joint-A protocol
-      OFF for this Q4 because the brief specifies "frozen R_phi at the
-      4096-D embedding"; our identity-A is a strict subset of LoRe's
+      OFF for this Q4 because the design fixes frozen R_phi at the
+      4096-D embedding; our identity-A is a strict subset of LoRe's
       learned-A which means our Q4 LoRe is a CONSERVATIVE underestimate).
 
-Apples-to-apples preservation per Skill: research-grade-code-audit-pre-launch
-G2 (hypothesis-vs-design alignment):
-  + Same 1394-user PRISM-LOCO split as canonical PILSD (filter:
+Apples-to-apples preservation:
+  + Same 1394-user PRISM-LOCO split as canonical PEBS (filter:
       MIN_CONV_PER_USER=2 / MIN_UTT_PER_USER=10)
   + Same Qwen2.5-7B-Instruct backbone (no LoRA adapter; raw model
       hidden state at pre-final layer; mean-pooled over response tokens)
@@ -63,11 +60,11 @@ G2 (hypothesis-vs-design alignment):
       reusing the existing pref_2025/lore_2025 recalibration logic
   + Same per-user RMSE evaluation as Phase H baselines
 
-Honest scope caveats (per Skill: honest-disclosure §6.3 SCOPE-not-RETRACT):
+Scope caveats:
   1. We FREEZE the PCA projection of the Qwen embedding rather than
      learning phi/R_phi jointly with lambda/w_i (paper learns jointly).
      This is INTENTIONAL: a learned phi would re-introduce backbone-side
-     freedom that breaks apples-to-apples with PILSD's per-user EB
+     freedom that breaks apples-to-apples with PEBS's per-user EB
      shrinkage on the same fixed RM scores. PReF paper Sec. 5.4 reports
      "scaling J leads to better performance" which we cannot exercise
      without a learned phi; honest caveat in Limitations.
@@ -76,7 +73,7 @@ Honest scope caveats (per Skill: honest-disclosure §6.3 SCOPE-not-RETRACT):
      training users; on PRISM all users are seen so this is the natural
      analog). The leakage we MUST avoid is per-user lambda/w_i fit on
      test-fold pairs -- handled in the inner LOCO loop.
-  3. Q4 closes the polynomial-basis pathology specifically: with 4096-D
+  3. Q4 resolves the polynomial-basis pathology specifically: with 4096-D
      input the "high-J polynomial blow-up" of B=16 (RMSE 4.25e6) cannot
      occur because PCA components are bounded and orthogonal.
   4. PCA reduction to top-J is faithful to LoRe's "low-rank" framing
@@ -87,21 +84,21 @@ Honest scope caveats (per Skill: honest-disclosure §6.3 SCOPE-not-RETRACT):
      is a learned LOW-DIM neural-net output, and PCA-projection is the
      no-learn analog.
 
-Output schema (per Skill: research-grade-code-audit-pre-launch G9):
+Output schema:
   results/track1_q4_pref_lore_full_embedding/
-    summary.json                 verdict_class (4-class STRICT),
+    summary.json                 verdict_class,
                                  methods.{pref_J2_emb, pref_J3_emb,
                                           pref_J6_emb, lore_B2_emb,
                                           lore_B4_emb, lore_B8_emb,
-                                          lore_B16_emb, pilsd_shrunk,
+                                          lore_B16_emb, pebs_shrunk,
                                           pop_slope},
-                                 paired_vs_pilsd, embedding_settings,
+                                 paired_vs_pebs, embedding_settings,
                                  anomalies_fired, runtime_seconds
     per_user.parquet             per-user RMSE rows
     embeddings_qwen25_7b_instruct.parquet   cached 4096-D embeddings
                                             (utterance_id -> 4096 floats)
 
-Stage A — embedding extraction (one-time, ~30-60 min on H100):
+Stage A — embedding extraction (one-time, ~30-60 min on an 80GB GPU):
   python q4_pref_lore_full_embedding.py --extract-embeddings
 
 Stage B — main run (~30-90 min CPU-bound on the SVD/PReF refinement):
@@ -109,9 +106,6 @@ Stage B — main run (~30-90 min CPU-bound on the SVD/PReF refinement):
 
 Smoke (~5 min on a small subset; verifies pipeline end-to-end):
   python q4_pref_lore_full_embedding.py --smoke
-
-Audit verdict (G1-G12 self-audit; orchestrator dispatched):
-  See memory/code_audit_q4_pref_lore_full_embedding_<HHMM>.md
 """
 from __future__ import annotations
 
@@ -128,7 +122,7 @@ import matplotlib.pyplot as plt
 from tqdm import tqdm
 
 # Paths -----------------------------------------------------------------------
-ROOT = Path(__file__).resolve().parents[2]   # 3_PILSD_Standalone/
+ROOT = Path(__file__).resolve().parents[2]   # 3_PEBS_Standalone/
 T1 = ROOT.parent / "1_Causal_RLHF"
 SCORED = T1 / "data/prism_rm_scored.parquet"
 
@@ -158,9 +152,9 @@ LR_W_DEFAULT = 0.1
 
 # Embedding extraction defaults
 # IMPORTANT: Qwen2.5-7B-Instruct has hidden_size=3584 (NOT 4096; the LoRe
-# paper's "4096-D" claim refers to the older Qwen2-7B). G1 assertion at
+# paper's "4096-D" claim refers to the older Qwen2-7B). An assertion at
 # launch verifies this; if model.config.hidden_size != EMB_DIM the script
-# aborts before incurring GPU cost. The brief's "4096-D" framing is
+# aborts before incurring GPU cost. The "4096-D" framing is
 # preserved in the result naming for narrative continuity (the closure-
 # of-pathology story works the same way at 3584-D as it would at 4096-D).
 QWEN_MODEL = "Qwen/Qwen2.5-7B-Instruct"
@@ -177,7 +171,7 @@ def set_inference_mode(model):
 
 
 # ============================================================================
-# G1 helper -- exact OLS with SE (used for PILSD-shrunk + per-user recalibration)
+# Helper -- exact OLS with SE (used for PEBS-shrunk + per-user recalibration)
 # ============================================================================
 
 def fit_ols_with_se(x: np.ndarray, y: np.ndarray):
@@ -200,10 +194,10 @@ def fit_ols_with_se(x: np.ndarray, y: np.ndarray):
 
 
 # ============================================================================
-# G1 helper -- PILSD-shrunk reference (verbatim from sister scripts)
+# Helper -- PEBS-shrunk reference (verbatim from sister scripts)
 # ============================================================================
 
-def method_pilsd_shrunk(x_tr, y_tr, x_te, alpha_pop, beta_pop, tau2_a, tau2_b):
+def method_pebs_shrunk(x_tr, y_tr, x_te, alpha_pop, beta_pop, tau2_a, tau2_b):
     a, b, se_a, se_b = fit_ols_with_se(x_tr, y_tr)
     if not np.isfinite(a):
         return alpha_pop + beta_pop * x_te
@@ -359,7 +353,7 @@ def project_embedding(emb: np.ndarray, mean_vec: np.ndarray,
 
 
 # ============================================================================
-# G1 / G5 — PReF Eq. 5 BT-MLE training (mirrors pref_2025_on_prism.py)
+# PReF Eq. 5 BT-MLE training (mirrors pref_2025_on_prism.py)
 # ============================================================================
 
 def _bt_loglik_grad_lambda(lam_i, phi_diffs, A, beta_l2):
@@ -432,7 +426,7 @@ def affine_recalibrate(rm_tr, sy_tr, lam_phi_tr):
 
 
 # ============================================================================
-# G1 / G5 — LoRe simplex projection + per-user weight refit
+# LoRe simplex projection + per-user weight refit
 # ============================================================================
 
 def simplex_project(v: np.ndarray) -> np.ndarray:
@@ -469,7 +463,7 @@ def solve_w_for_user(dphi_u, A_basis, w_init, n_steps=150, lr=0.1, B=3):
 
 
 # ============================================================================
-# G2 helper — build intra-user pair phi-diffs from embeddings
+# Helper — build intra-user pair phi-diffs from embeddings
 # ============================================================================
 
 def build_pair_phi_diffs_emb(g_user: pd.DataFrame, emb_dict: dict,
@@ -515,7 +509,7 @@ def build_pair_phi_diffs_emb(g_user: pd.DataFrame, emb_dict: dict,
 
 
 # ============================================================================
-# G1 / G2 — PReF prediction at test (per-user fold)
+# PReF prediction at test (per-user fold)
 # ============================================================================
 
 def method_pref_emb(g_user, hc_id, emb_dict, mean_vec, basis,
@@ -570,14 +564,14 @@ def method_pref_emb(g_user, hc_id, emb_dict, mean_vec, basis,
 
 
 # ============================================================================
-# G1 / G2 — LoRe prediction at test (per-user fold)
+# LoRe prediction at test (per-user fold)
 # ============================================================================
 
 def method_lore_emb(g_user, hc_id, emb_dict, mean_vec, basis,
                      B, lr_w, rng, alpha_pop, beta_pop):
     """LoRe per-user-fold prediction with PCA-projected embeddings.
 
-    Q4 freezes A = identity (the PCA basis IS the basis; per the brief
+    Q4 freezes A = identity (the PCA basis IS the basis; per the design
     "use 4096-D embeddings instead of polynomial substitution"). This
     is a CONSERVATIVE underestimate of LoRe's full method (paper learns
     A jointly); honest scope caveat in Limitations.
@@ -649,7 +643,7 @@ LORE_VARIANTS = [
     ("lore_B16_emb", 16),
 ]
 METHOD_NAMES = (
-    ["pop_slope", "pilsd_shrunk"]
+    ["pop_slope", "pebs_shrunk"]
     + [v[0] for v in PREF_VARIANTS]
     + [v[0] for v in LORE_VARIANTS]
 )
@@ -695,7 +689,7 @@ def run_loco(args):
     sbs = np.array([s[3] for s in user_stats if np.isfinite(s[3])])
     tau2_a = max(0.0, float(np.var(alphas, ddof=1) - np.mean(sas ** 2)))
     tau2_b = max(0.0, float(np.var(betas, ddof=1) - np.mean(sbs ** 2)))
-    print(f"[pilsd]  tau2_a={tau2_a:.2f}  tau2_b={tau2_b:.4f}")
+    print(f"[pebs]  tau2_a={tau2_a:.2f}  tau2_b={tau2_b:.4f}")
 
     print(f"[pca]    fitting top-{max(K_GRID_ALL)} PCA on all "
           f"{len(emb_dict)} embeddings ...")
@@ -732,7 +726,7 @@ def run_loco(args):
             y_te = te["score_user"].to_numpy(dtype=np.float64)
             preds = {
                 "pop_slope": alpha_pop + beta_pop * x_te,
-                "pilsd_shrunk": method_pilsd_shrunk(
+                "pebs_shrunk": method_pebs_shrunk(
                     x_tr, y_tr, x_te, alpha_pop, beta_pop, tau2_a, tau2_b),
             }
             for tag, J, use_svd, use_l2 in PREF_VARIANTS:
@@ -807,7 +801,7 @@ def run_loco(args):
         "lore_settings": {
             "B_grid": list(B_GRID_LORE),
             "lr_w": args.lr_w,
-            "A_protocol": "identity (frozen PCA basis = R_phi; no joint A learning per Q4 brief)",
+            "A_protocol": "identity (frozen PCA basis = R_phi; no joint A learning in Q4)",
         },
         "methods": {},
         "rmse_abs": {m: float(pu[f"rmse_{m}"].mean()) for m in METHOD_NAMES},
@@ -829,47 +823,47 @@ def run_loco(args):
             "rmse_reduction_pct_mean": mean_g,
             "rmse_reduction_pct_ci95": [lo, hi],
             "rmse_reduction_pct_se": se,
-            "status": "reimplementation_q4_4096d" if m != "pilsd_shrunk" else "reference",
+            "status": "reimplementation_q4_4096d" if m != "pebs_shrunk" else "reference",
         }
         print(f"{m:>20s}  {pu[f'rmse_{m}'].mean():8.3f}  "
               f"{mean_g:+9.3f}  [{lo:+6.3f}, {hi:+6.3f}]")
 
-    pilsd_gain = pu["gain_pilsd_shrunk_pct"].to_numpy()
-    summary["paired_vs_pilsd"] = {}
+    pebs_gain = pu["gain_pebs_shrunk_pct"].to_numpy()
+    summary["paired_vs_pebs"] = {}
     for m in METHOD_NAMES:
-        if m in ("pop_slope", "pilsd_shrunk"):
+        if m in ("pop_slope", "pebs_shrunk"):
             continue
-        diff = pilsd_gain - pu[f"gain_{m}_pct"].to_numpy()
+        diff = pebs_gain - pu[f"gain_{m}_pct"].to_numpy()
         md, lo, hi, se = cluster_boot_ci(diff, args.n_boot, args.seed + 1)
-        summary["paired_vs_pilsd"][m] = {
+        summary["paired_vs_pebs"][m] = {
             "mean_delta_pct": md, "ci95": [lo, hi], "se": se,
-            "pilsd_better": bool(lo > 0),
+            "pebs_better": bool(lo > 0),
         }
         sig = "*" if lo > 0 or hi < 0 else ""
-        print(f"  PILSD - {m:>16s}: {md:+.3f}%  CI [{lo:+.3f}, {hi:+.3f}] {sig}")
+        print(f"  PEBS - {m:>16s}: {md:+.3f}%  CI [{lo:+.3f}, {hi:+.3f}] {sig}")
 
-    pilsd_g_lo = summary["methods"]["pilsd_shrunk"]["rmse_reduction_pct_ci95"][0]
-    pilsd_g_mean = summary["methods"]["pilsd_shrunk"]["rmse_reduction_pct_mean"]
+    pebs_g_lo = summary["methods"]["pebs_shrunk"]["rmse_reduction_pct_ci95"][0]
+    pebs_g_mean = summary["methods"]["pebs_shrunk"]["rmse_reduction_pct_mean"]
     pref_keys = [v[0] for v in PREF_VARIANTS]
     lore_keys = [v[0] for v in LORE_VARIANTS]
     baseline_keys = pref_keys + lore_keys
 
-    pilsd_better_all = all(
-        summary["paired_vs_pilsd"][m]["pilsd_better"] for m in baseline_keys)
-    pilsd_loses_any = any(
-        summary["paired_vs_pilsd"][m]["ci95"][1] < 0 for m in baseline_keys)
+    pebs_better_all = all(
+        summary["paired_vs_pebs"][m]["pebs_better"] for m in baseline_keys)
+    pebs_loses_any = any(
+        summary["paired_vs_pebs"][m]["ci95"][1] < 0 for m in baseline_keys)
     best_baseline_gain = max(
         summary["methods"][m]["rmse_reduction_pct_mean"] for m in baseline_keys)
-    margin_vs_best = pilsd_g_mean - best_baseline_gain
+    margin_vs_best = pebs_g_mean - best_baseline_gain
 
-    if pilsd_loses_any:
-        summary["verdict_class"] = "FALSIFIED-PILSD-LOSES-WITH-LARGE-EMBEDDING"
-    elif pilsd_better_all and margin_vs_best >= 3.0 and pilsd_g_lo > 0:
-        summary["verdict_class"] = "ESTABLISHED-PILSD-RMSE-DOMINATES-PREF-LORE-LARGE-EMBEDDING"
-    elif pilsd_better_all and pilsd_g_lo > 0:
-        summary["verdict_class"] = "MODERATE-PILSD-MARGIN-SHRINKS"
+    if pebs_loses_any:
+        summary["verdict_class"] = "REJECTED-PEBS-LOSES-WITH-LARGE-EMBEDDING"
+    elif pebs_better_all and margin_vs_best >= 3.0 and pebs_g_lo > 0:
+        summary["verdict_class"] = "CONFIRMED-PEBS-RMSE-DOMINATES-PREF-LORE-LARGE-EMBEDDING"
+    elif pebs_better_all and pebs_g_lo > 0:
+        summary["verdict_class"] = "PARTIAL-PEBS-MARGIN-SHRINKS"
     else:
-        summary["verdict_class"] = "PRELIMINARY-INCONCLUSIVE"
+        summary["verdict_class"] = "TENTATIVE-INCONCLUSIVE"
     summary["margin_vs_best_baseline_pct"] = float(margin_vs_best)
     summary["best_baseline_method"] = max(
         baseline_keys,
@@ -895,7 +889,7 @@ def run_loco(args):
 
 def write_latex_table(summary: dict, out_path: Path):
     pretty = {
-        "pilsd_shrunk":  ("\\PILSD{} \\emph{(ours)}",
+        "pebs_shrunk":  ("\\PEBS{} \\emph{(ours)}",
                             "Per-user EB-shrunk $(\\alpha_j, \\beta_j)$ on Qwen RM scalar",
                             "hierarchical EB"),
         "pref_J2_emb":   ("PReF $J{=}2$ (4096-D emb.) \\citep{shenfeld2025pref}",
@@ -920,7 +914,7 @@ def write_latex_table(summary: dict, out_path: Path):
                             "LoRe Eq.~7+10 with frozen top-16 PCA",
                             "low-rank B=16"),
     }
-    order = ["pilsd_shrunk"] + [v[0] for v in PREF_VARIANTS] + [v[0] for v in LORE_VARIANTS]
+    order = ["pebs_shrunk"] + [v[0] for v in PREF_VARIANTS] + [v[0] for v in LORE_VARIANTS]
     lines = []
     lines.append("% Q4 head-to-head: PReF + LoRe full 4096-D embedding sweep on PRISM LOCO.")
     lines.append("% Generated by paper/scripts/q4_pref_lore_full_embedding.py")
@@ -932,9 +926,9 @@ def write_latex_table(summary: dict, out_path: Path):
     lines.append("\\setlength{\\tabcolsep}{4pt}")
     lines.append("\\renewcommand{\\arraystretch}{1.15}")
     lines.append("\\caption{\\textbf{Q4: PReF + LoRe head-to-head with 4096-D Qwen2.5-7B-Instruct "
-                 "pre-final-layer embeddings} (closes audit-flagged polynomial-basis pathology). "
+                 "pre-final-layer embeddings} (resolves the polynomial-basis pathology). "
                  "PReF and LoRe re-implemented with frozen top-$K$ PCA projection of the same "
-                 "Qwen2.5-7B-Instruct pre-final-layer hidden state used by PILSD's RM-score "
+                 "Qwen2.5-7B-Instruct pre-final-layer hidden state used by PEBS's RM-score "
                  "feature, replacing the polynomial-basis substitution of "
                  "\\S~Tab.~\\ref{tab:lore-headtohead-rmse-numbers}. "
                  "Same 1394-user PRISM LOCO split, same seed=20260420, same cluster-bootstrap "
@@ -954,7 +948,7 @@ def write_latex_table(summary: dict, out_path: Path):
         meth = summary['methods'][m]
         g = meth['rmse_reduction_pct_mean']
         ci = meth['rmse_reduction_pct_ci95']
-        g_s = f"\\textbf{{{g:+.2f}}}" if m == "pilsd_shrunk" else f"{g:+.2f}"
+        g_s = f"\\textbf{{{g:+.2f}}}" if m == "pebs_shrunk" else f"{g:+.2f}"
         ci_s = f"[{ci[0]:+.2f}, {ci[1]:+.2f}]"
         lines.append(f"{pretty_name} & {recipe} & {tag} & {g_s} & {ci_s} \\\\")
     lines.append("\\bottomrule")
@@ -967,10 +961,10 @@ def write_latex_table(summary: dict, out_path: Path):
 
 
 def write_figure(summary: dict, out_path: Path):
-    order = ["pilsd_shrunk"] + [v[0] for v in PREF_VARIANTS] + [v[0] for v in LORE_VARIANTS]
+    order = ["pebs_shrunk"] + [v[0] for v in PREF_VARIANTS] + [v[0] for v in LORE_VARIANTS]
     order = [m for m in order if m in summary['methods']]
     pretty = {
-        "pilsd_shrunk":  "PILSD (ours)",
+        "pebs_shrunk":  "PEBS (ours)",
         "pref_J2_emb":   "PReF J=2 (4096-D)",
         "pref_J3_emb":   "PReF J=3 (4096-D)",
         "pref_J6_emb":   "PReF J=6 (4096-D)",
@@ -980,7 +974,7 @@ def write_figure(summary: dict, out_path: Path):
         "lore_B16_emb":  "LoRe B=16 (4096-D)",
     }
     palette = {
-        "pilsd_shrunk":  "#1f77b4",
+        "pebs_shrunk":  "#1f77b4",
         "pref_J2_emb":   "#ffbb78",
         "pref_J3_emb":   "#ff7f0e",
         "pref_J6_emb":   "#d62728",
@@ -1005,7 +999,7 @@ def write_figure(summary: dict, out_path: Path):
         va = "bottom" if mval >= 0 else "top"
         ax.text(b.get_x() + b.get_width() / 2, label_y, f"{mval:+.2f}%",
                   ha="center", va=va, fontsize=9,
-                  fontweight="bold" if order[i] == "pilsd_shrunk" else "normal")
+                  fontweight="bold" if order[i] == "pebs_shrunk" else "normal")
     ax.axhline(0, color="gray", lw=0.7, ls="--")
     ax.set_xticks(x)
     ax.set_xticklabels([pretty[m] for m in order], rotation=20, fontsize=9, ha="right")

@@ -1,6 +1,6 @@
 """RandomForest out-of-sample R² for (α_j, β_j) ~ demographics + survey features.
 
-Addresses reviewer W5 (REVIEWER_REPORT_iter119.md):
+Addresses the nonlinearity objection:
 > "η² is a linear variance decomposition and will miss nonlinear interactions
 > (age × education × use-case). If survey-rating baseline explains ~8% of
 > α̂_j variance, why claim demographic parameterization fails?"
@@ -32,10 +32,10 @@ Design
 5. Report: out-of-sample R² mean ± std across 5 folds + cluster-bootstrap
    95% CI for each R² estimate.
 
-6. Direct-test Task: replace PILSD with a "demographic-conditional pop-slope":
+6. Direct-test Task: replace PEBS with a "demographic-conditional pop-slope":
    for each demographic stratum, fit (α_D, β_D) on held-out users and use as
    prediction for the test user. Compare within-user held-out RMSE directly
-   to vanilla pop-slope (25.52) and PILSD linear shrunk (23.33).
+   to vanilla pop-slope (25.52) and PEBS linear shrunk (23.33).
 
 NEVER include per-user mean_score_user as a feature — that is mechanical
 leakage because β_j ≈ mean(score_user_j) by construction of the MixedLM.
@@ -314,7 +314,7 @@ def ols_intercept_slope(x, y):
 def run_demographic_conditional_rmse(
     rm_df, demo_df, cat_feature_cols, min_obs_per_user=6, k_folds=5, seed=42
 ):
-    """Replace PILSD with "pop-slope within demographic stratum".
+    """Replace PEBS with "pop-slope within demographic stratum".
 
     For each held-out test user, predict their y = alpha_D + beta_D * rm,
     where (alpha_D, beta_D) are fitted on all TRAINING users matching that
@@ -418,8 +418,8 @@ def run_demographic_conditional_rmse(
     return results
 
 
-def run_pop_slope_and_pilsd_rmse(rm_df, min_obs_per_user=6, k_folds=5, seed=42):
-    """Replicate the pop_slope and pilsd_shrunk RMSE numbers from
+def run_pop_slope_and_pebs_rmse(rm_df, min_obs_per_user=6, k_folds=5, seed=42):
+    """Replicate the pop_slope and pebs_shrunk RMSE numbers from
     eval_user_score_mse_shrunk.py exactly (within-user CV).
 
     This gives us an apples-to-apples comparison point on the SAME users
@@ -464,7 +464,7 @@ def run_pop_slope_and_pilsd_rmse(rm_df, min_obs_per_user=6, k_folds=5, seed=42):
         idx = np.arange(n)
         rng.shuffle(idx)
         fold_size = n // k_folds
-        squared = {"pop_slope": [], "pilsd_shrunk": []}
+        squared = {"pop_slope": [], "pebs_shrunk": []}
         for i in range(k_folds):
             start = i * fold_size
             stop = (i + 1) * fold_size if i < k_folds - 1 else n
@@ -477,7 +477,7 @@ def run_pop_slope_and_pilsd_rmse(rm_df, min_obs_per_user=6, k_folds=5, seed=42):
             # pop slope
             y_hat_ps = intercept_pop + slope_pop * x_te
             squared["pop_slope"].extend(((y_hat_ps - y_te) ** 2).tolist())
-            # PILSD shrunk
+            # PEBS shrunk
             k_tr = len(x_tr)
             x_bar_tr = x_tr.mean()
             Sxx_tr = ((x_tr - x_bar_tr) ** 2).sum()
@@ -490,14 +490,14 @@ def run_pop_slope_and_pilsd_rmse(rm_df, min_obs_per_user=6, k_folds=5, seed=42):
             a_s = omega_a * i_tr + (1 - omega_a) * intercept_pop
             b_s = omega_b * s_tr + (1 - omega_b) * slope_pop
             y_hat_sh = a_s + b_s * x_te
-            squared["pilsd_shrunk"].extend(((y_hat_sh - y_te) ** 2).tolist())
+            squared["pebs_shrunk"].extend(((y_hat_sh - y_te) ** 2).tolist())
         if not squared["pop_slope"]:
             continue
         per_user_rows.append({
             "user_id": uid,
             "n": n,
             "rmse_pop_slope": float(np.sqrt(np.mean(squared["pop_slope"]))),
-            "rmse_pilsd_shrunk": float(np.sqrt(np.mean(squared["pilsd_shrunk"]))),
+            "rmse_pebs_shrunk": float(np.sqrt(np.mean(squared["pebs_shrunk"]))),
         })
     return pd.DataFrame(per_user_rows)
 
@@ -596,15 +596,15 @@ def main():
     for stratum, d in dcps.items():
         print(f"  {stratum:>24}: mean RMSE = {d['mean_rmse']:.3f} ({d['n_unique_strata']} strata)")
 
-    # ---- Baseline PILSD / pop-slope (replication to confirm existing 25.52 / 23.33) ----
+    # ---- Baseline PEBS / pop-slope (replication to confirm existing 25.52 / 23.33) ----
     print("\n=== Baseline replication ===")
-    baseline_df = run_pop_slope_and_pilsd_rmse(
+    baseline_df = run_pop_slope_and_pebs_rmse(
         rm_df, min_obs_per_user=args.min_obs_per_user,
         k_folds=args.n_splits, seed=args.seed,
     )
     base_pop = float(baseline_df["rmse_pop_slope"].mean())
-    base_pilsd = float(baseline_df["rmse_pilsd_shrunk"].mean())
-    print(f"  pop_slope: {base_pop:.3f}  pilsd_shrunk: {base_pilsd:.3f}")
+    base_pebs = float(baseline_df["rmse_pebs_shrunk"].mean())
+    print(f"  pop_slope: {base_pop:.3f}  pebs_shrunk: {base_pebs:.3f}")
 
     # ---- Assemble JSON output ----
     out = {
@@ -660,7 +660,7 @@ def main():
         },
         "baseline_replication": {
             "pop_slope_mean_rmse": base_pop,
-            "pilsd_shrunk_mean_rmse": base_pilsd,
+            "pebs_shrunk_mean_rmse": base_pebs,
             "n_users": int(len(baseline_df)),
         },
         "target_distribution": {
@@ -701,13 +701,13 @@ def write_report(out, path):
     max_r2 = max(alpha_r2, beta_r2)
     if max_r2 < 0.10:
         verdict = "HOLDS STRONGLY"
-        verdict_note = "Demographics+stated-prefs explain < 10% of (α, β) variance; PILSD's 'idiosyncratic' claim is empirically supported by the RF upper bound on demographic-parameterizable structure."
+        verdict_note = "Demographics+stated-prefs explain < 10% of (α, β) variance; PEBS's 'idiosyncratic' claim is empirically supported by the RF upper bound on demographic-parameterizable structure."
     elif max_r2 < 0.25:
         verdict = "PARTIALLY HOLDS"
-        verdict_note = "Demographics+stated-prefs explain 10-25% of at least one parameter's variance. PILSD still dominates on direct RMSE comparison but a feature-conditional prior is a valid §5.3 future-work direction."
+        verdict_note = "Demographics+stated-prefs explain 10-25% of at least one parameter's variance. PEBS still dominates on direct RMSE comparison but a feature-conditional prior is a valid §5.3 future-work direction."
     else:
         verdict = "FAILS"
-        verdict_note = "Demographics+stated-prefs explain >25% of variance; PILSD's 'idiosyncratic' framing is too strong and the paper should concede demographic-conditional stratification is a viable alternative."
+        verdict_note = "Demographics+stated-prefs explain >25% of variance; PEBS's 'idiosyncratic' framing is too strong and the paper should concede demographic-conditional stratification is a viable alternative."
 
     # Direct-test winner
     dcps = out["demographic_conditional_pop_slope"]
@@ -715,10 +715,10 @@ def write_report(out, path):
     best_stratum = min(dcps.items(), key=lambda kv: kv[1]["mean_rmse"])
     best_name, best_d = best_stratum
     base_pop = base["pop_slope_mean_rmse"]
-    base_pilsd = base["pilsd_shrunk_mean_rmse"]
-    pilsd_gain = base_pop - base_pilsd
+    base_pebs = base["pebs_shrunk_mean_rmse"]
+    pebs_gain = base_pop - base_pebs
     demo_gain = base_pop - best_d["mean_rmse"]
-    pct_of_pilsd = (demo_gain / pilsd_gain * 100.0) if pilsd_gain > 0 else 0.0
+    pct_of_pebs = (demo_gain / pebs_gain * 100.0) if pebs_gain > 0 else 0.0
 
     report = f"""# Demographic RandomForest R² — Reviewer W5 Response
 
@@ -736,20 +736,20 @@ def write_report(out, path):
 Per-fold α: {[f'{x:.4f}' for x in rf_a['per_fold_r2']]}  (mean {rf_a['mean_fold_r2']:.4f} ± {rf_a['std_fold_r2']:.4f})
 Per-fold β: {[f'{x:.4f}' for x in rf_b['per_fold_r2']]}  (mean {rf_b['mean_fold_r2']:.4f} ± {rf_b['std_fold_r2']:.4f})
 
-## Direct test: can demographic-conditional pop-slope replace PILSD?
+## Direct test: can demographic-conditional pop-slope replace PEBS?
 
-| Predictor | Mean within-user RMSE | Δ vs PILSD linear shrunk |
+| Predictor | Mean within-user RMSE | Δ vs PEBS linear shrunk |
 |-----------|----------------------:|-------------------------:|
 | Population slope (vanilla)               | {base_pop:.3f} | — |
-| **PILSD linear shrunk**                  | **{base_pilsd:.3f}** | — |
+| **PEBS linear shrunk**                  | **{base_pebs:.3f}** | — |
 """
     for name, d in dcps.items():
-        diff = d["mean_rmse"] - base_pilsd  # positive = demo-cond WORSE than PILSD
-        report += f"| Demographic-conditional pop-slope ({name}) | {d['mean_rmse']:.3f} ({d['n_unique_strata']} strata) | {diff:+.3f} (PILSD better by this amount) |\n"
+        diff = d["mean_rmse"] - base_pebs  # positive = demo-cond WORSE than PEBS
+        report += f"| Demographic-conditional pop-slope ({name}) | {d['mean_rmse']:.3f} ({d['n_unique_strata']} strata) | {diff:+.3f} (PEBS better by this amount) |\n"
 
     report += f"""
 
-Best demographic-conditional stratification ({best_name}) captures **{pct_of_pilsd:.1f}%** of the PILSD-over-pop gap. PILSD linear shrunk retains a **{best_d['mean_rmse'] - base_pilsd:+.3f}** RMSE advantage over the best stratification (lower is better for RMSE).
+Best demographic-conditional stratification ({best_name}) captures **{pct_of_pebs:.1f}%** of the PEBS-over-pop gap. PEBS linear shrunk retains a **{best_d['mean_rmse'] - base_pebs:+.3f}** RMSE advantage over the best stratification (lower is better for RMSE).
 
 ## Top RF features
 
@@ -763,7 +763,7 @@ Best demographic-conditional stratification ({best_name}) captures **{pct_of_pil
 
     report += f"""
 
-## Verdict: PILSD's "idiosyncratic" claim {verdict}
+## Verdict: PEBS's "idiosyncratic" claim {verdict}
 
 {verdict_note}
 
@@ -775,8 +775,8 @@ demographic-conditional predictor — linear or nonlinear, one-way or
 high-order interaction.
 
 The direct RMSE test corroborates this: the best demographic-conditional
-pop-slope closes only {pct_of_pilsd:.0f}% of the PILSD-vs-pop gap. A feature-
-conditional prior could be combined with PILSD in future work ({verdict}),
+pop-slope closes only {pct_of_pebs:.0f}% of the PEBS-vs-pop gap. A feature-
+conditional prior could be combined with PEBS in future work ({verdict}),
 but cannot substitute for per-user calibration.
 
 ## Paper integration recommendation
@@ -793,13 +793,13 @@ distribution is individual-level, not demographic-level, variation.")
 > out-of-sample R² of only {alpha_r2:.3f} for α and {beta_r2:.3f} for β
 > (95% cluster-bootstrap CI in Appendix), confirming that nonlinear
 > demographic interactions do not rescue the demographic-parameterization
-> hypothesis. A direct head-to-head — replacing PILSD with a demographic-
-> conditional pop-slope — closes at most {pct_of_pilsd:.0f}% of the
-> PILSD-vs-pop RMSE gap.
+> hypothesis. A direct head-to-head — replacing PEBS with a demographic-
+> conditional pop-slope — closes at most {pct_of_pebs:.0f}% of the
+> PEBS-vs-pop RMSE gap.
 
 **Appendix table** (recommended): Table with all 4 stratification granularities
 (gender_only, gender×age, gender×age×edu, gender×age×edu×use) showing their
-RMSE vs the {base_pilsd:.3f} PILSD-shrunk headline.
+RMSE vs the {base_pebs:.3f} PEBS-shrunk headline.
 
 ## Data & reproducibility
 

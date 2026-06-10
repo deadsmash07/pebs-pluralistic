@@ -1,8 +1,8 @@
-"""PluriHarms vs PRISM per-user calibrator distribution comparison (iter+N+125).
+"""PluriHarms vs PRISM per-user calibrator distribution comparison.
 
 Content-first new finding: do the per-user (alpha_j, beta_j) distributions
 fitted on PRISM and PluriHarms look similar? Similar distributions would
-strengthen the cross-dataset PILSD generalization claim: the
+strengthen the cross-dataset PEBS generalization claim: the
 "annotator idiosyncrasy" structure is consistent across completely
 different crowdsourcing protocols (open-ended dialogue preference vs
 harm rating).
@@ -15,7 +15,7 @@ Specifically:
 5. Demographic correlates of (alpha_j, beta_j) in each
 
 If the (tau, correlation) structure looks similar, it's a strong signal
-that PILSD is capturing a GENUINE psychometric property of human
+that PEBS is capturing a GENUINE psychometric property of human
 annotators rather than a dataset-specific artifact.
 """
 

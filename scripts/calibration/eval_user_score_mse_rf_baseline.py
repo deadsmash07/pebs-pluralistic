@@ -3,7 +3,7 @@ a flexible non-parametric learner?
 
 Hypothesis
 ----------
-If PILSD (linear + 2-param per user, or quadratic + 3-param per user) still
+If PEBS (linear + 2-param per user, or quadratic + 3-param per user) still
 beats a non-parametric learner (no functional-form assumption), then the
 RANDOM-EFFECT structure matters MORE than model flexibility.
 
@@ -13,8 +13,8 @@ is locked):
 
     1. no_calib             predict train-fold mean of y
     2. pop_slope            global α₀ + β₀·x  (paper headline baseline)
-    3. pilsd_shrunk         per-user EB-shrunk linear
-    4. pilsd_quadratic      per-user EB-shrunk quadratic (N+179 headline)
+    3. pebs_shrunk         per-user EB-shrunk linear
+    4. pebs_quadratic      per-user EB-shrunk quadratic (N+179 headline)
     5. rf_per_user          RF(200, depth 10) on [rm_score, user_id_onehot]
     6. rf_global            RF(200, depth 10) on [rm_score, demographic_onehot]
                             — tests whether user_id is truly irreducible vs
@@ -30,8 +30,8 @@ Per-user RMSE is the unit of analysis for Wilcoxon and bootstrap CIs, giving
 
 Reports:
   - mean/median RMSE per arm
-  - pairwise Wilcoxon (2-sided) vs pilsd_shrunk
-  - cluster-bootstrap 95% CI on mean(RMSE_RF) - mean(RMSE_PILSD_shrunk)
+  - pairwise Wilcoxon (2-sided) vs pebs_shrunk
+  - cluster-bootstrap 95% CI on mean(RMSE_RF) - mean(RMSE_PEBS_shrunk)
   - relative improvement vs pop_slope (paper-style)
 
 Refs: Breiman 2001 RF; Gelman & Hill 2007 §12 partial pooling.
@@ -300,9 +300,9 @@ def main():
     # scripts exactly. They use a single rng drawn once, then advanced per
     # user. We mirror that pattern here for per-user arms so the exact same
     # fold indices get used that the paper headline used.
-    rng_pilsd = np.random.default_rng(args.seed)
+    rng_pebs = np.random.default_rng(args.seed)
 
-    arms = ["no_calib", "pop_slope", "pilsd_shrunk", "pilsd_quadratic",
+    arms = ["no_calib", "pop_slope", "pebs_shrunk", "pebs_quadratic",
             "rf_per_user", "rf_global"]
     per_user_rows = []
     skipped_no_demo = (X_global is None)
@@ -314,7 +314,7 @@ def main():
         x = grp.rm_score.to_numpy()
         yu = grp.score_user.to_numpy().astype(float)
         # Regenerate identical folds with fresh rng
-        folds = kfold_split(n, args.k_folds, rng_pilsd)
+        folds = kfold_split(n, args.k_folds, rng_pebs)
         squared = {a: [] for a in arms}
         global_rows = grp._row.to_numpy()
 
@@ -330,15 +330,15 @@ def main():
             # 2. pop_slope
             yhat = pop_alpha + pop_beta * x_te
             squared["pop_slope"].extend(((yhat - y_te) ** 2).tolist())
-            # 3. pilsd_shrunk (linear)
+            # 3. pebs_shrunk (linear)
             a, b, Va, Vb = ols_linear_with_V(x_tr, y_tr)
             wa = tau_a_lin / (tau_a_lin + Va) if np.isfinite(Va) else 0.0
             wb = tau_b_lin / (tau_b_lin + Vb) if np.isfinite(Vb) else 0.0
             a_s = wa * a + (1 - wa) * pop_alpha
             b_s = wb * b + (1 - wb) * pop_beta
             yhat = a_s + b_s * x_te
-            squared["pilsd_shrunk"].extend(((yhat - y_te) ** 2).tolist())
-            # 4. pilsd_quadratic
+            squared["pebs_shrunk"].extend(((yhat - y_te) ** 2).tolist())
+            # 4. pebs_quadratic
             aq, bq, cq, Vaq, Vbq, Vcq = ols_quadratic_with_V(x_tr, y_tr)
             waq = tau_a_qd / (tau_a_qd + Vaq) if np.isfinite(Vaq) else 0.0
             wbq = tau_b_qd / (tau_b_qd + Vbq) if np.isfinite(Vbq) else 0.0
@@ -347,7 +347,7 @@ def main():
             b_sq = wbq * bq + (1 - wbq) * pop_lin_qd
             c_sq = wcq * cq + (1 - wcq) * pop_quad_qd
             yhat = a_sq + b_sq * x_te + c_sq * x_te ** 2
-            squared["pilsd_quadratic"].extend(((yhat - y_te) ** 2).tolist())
+            squared["pebs_quadratic"].extend(((yhat - y_te) ** 2).tolist())
             # 5. rf_per_user (look up per-row predictions)
             yhat = rf_per_user_pred[g_te]
             squared["rf_per_user"].extend(((yhat - y_te) ** 2).tolist())
@@ -386,7 +386,7 @@ def main():
         agg_median[a] = float(vals.median()) if len(vals) else float("nan")
         print(f"  {col:<22} mean={agg_mean[a]:.4f}  median={agg_median[a]:.4f}")
 
-    # ------------------ Wilcoxon pairs (each arm vs pilsd_shrunk) ------------------
+    # ------------------ Wilcoxon pairs (each arm vs pebs_shrunk) ------------------
     def paired(a_col, b_col):
         # Drop rows where either is NaN (rf_global may be nan if demo missing)
         aa, bb = pu[a_col].to_numpy(), pu[b_col].to_numpy()
@@ -408,11 +408,11 @@ def main():
         }
 
     comparisons = {}
-    for a in ["no_calib", "pop_slope", "pilsd_quadratic", "rf_per_user", "rf_global"]:
+    for a in ["no_calib", "pop_slope", "pebs_quadratic", "rf_per_user", "rf_global"]:
         if f"rmse_{a}" not in pu.columns:
             continue
-        comparisons[f"{a}_vs_pilsd_shrunk"] = paired(f"rmse_{a}", "rmse_pilsd_shrunk")
-    print(f"\n=== Paired Wilcoxon (each arm vs pilsd_shrunk; Δ<0 ⇒ arm better) ===")
+        comparisons[f"{a}_vs_pebs_shrunk"] = paired(f"rmse_{a}", "rmse_pebs_shrunk")
+    print(f"\n=== Paired Wilcoxon (each arm vs pebs_shrunk; Δ<0 ⇒ arm better) ===")
     for name, d in comparisons.items():
         if not np.isfinite(d.get("mean_delta_a_minus_b", float("nan"))):
             print(f"  {name:<38} (no data)")
@@ -452,11 +452,11 @@ def main():
         }
 
     bootstraps = {}
-    for a in ["rf_per_user", "rf_global", "pilsd_quadratic"]:
+    for a in ["rf_per_user", "rf_global", "pebs_quadratic"]:
         col = f"rmse_{a}"
         if col in pu.columns:
-            bootstraps[f"{a}_minus_pilsd_shrunk"] = boot_ci(col, "rmse_pilsd_shrunk")
-    print(f"\n=== Cluster-bootstrap 95% CI on mean(arm) - mean(pilsd_shrunk) ===")
+            bootstraps[f"{a}_minus_pebs_shrunk"] = boot_ci(col, "rmse_pebs_shrunk")
+    print(f"\n=== Cluster-bootstrap 95% CI on mean(arm) - mean(pebs_shrunk) ===")
     for name, d in bootstraps.items():
         if not np.isfinite(d.get("point_estimate", float("nan"))):
             print(f"  {name:<38} (no data)")
@@ -477,22 +477,22 @@ def main():
 
     # ------------------ Verdict ------------------
     verdict_parts = []
-    rf_pu = comparisons.get("rf_per_user_vs_pilsd_shrunk", {})
+    rf_pu = comparisons.get("rf_per_user_vs_pebs_shrunk", {})
     if rf_pu and np.isfinite(rf_pu.get("mean_delta_a_minus_b", float("nan"))):
         if rf_pu["mean_delta_a_minus_b"] > 0 and rf_pu["wilcoxon_p"] < 0.05:
-            verdict_parts.append("PILSD_SHRUNK_BEATS_RF_PER_USER")
+            verdict_parts.append("PEBS_SHRUNK_BEATS_RF_PER_USER")
         elif rf_pu["mean_delta_a_minus_b"] < 0 and rf_pu["wilcoxon_p"] < 0.05:
-            verdict_parts.append("RF_PER_USER_BEATS_PILSD_SHRUNK")
+            verdict_parts.append("RF_PER_USER_BEATS_PEBS_SHRUNK")
         else:
-            verdict_parts.append("RF_PER_USER_VS_PILSD_NULL")
-    rf_g = comparisons.get("rf_global_vs_pilsd_shrunk", {})
+            verdict_parts.append("RF_PER_USER_VS_PEBS_NULL")
+    rf_g = comparisons.get("rf_global_vs_pebs_shrunk", {})
     if rf_g and np.isfinite(rf_g.get("mean_delta_a_minus_b", float("nan"))):
         if rf_g["mean_delta_a_minus_b"] > 0 and rf_g["wilcoxon_p"] < 0.05:
-            verdict_parts.append("PILSD_SHRUNK_BEATS_RF_GLOBAL")
+            verdict_parts.append("PEBS_SHRUNK_BEATS_RF_GLOBAL")
         elif rf_g["mean_delta_a_minus_b"] < 0 and rf_g["wilcoxon_p"] < 0.05:
-            verdict_parts.append("RF_GLOBAL_BEATS_PILSD_SHRUNK")
+            verdict_parts.append("RF_GLOBAL_BEATS_PEBS_SHRUNK")
         else:
-            verdict_parts.append("RF_GLOBAL_VS_PILSD_NULL")
+            verdict_parts.append("RF_GLOBAL_VS_PEBS_NULL")
     verdict = " | ".join(verdict_parts) if verdict_parts else "INCONCLUSIVE"
     print(f"\n=== VERDICT: {verdict} ===")
 
@@ -517,8 +517,8 @@ def main():
         "aggregate_rmse_mean": agg_mean,
         "aggregate_rmse_median": agg_median,
         "relative_improvement_vs_pop_slope_pct": rel,
-        "comparisons_vs_pilsd_shrunk": comparisons,
-        "bootstrap_delta_vs_pilsd_shrunk": bootstraps,
+        "comparisons_vs_pebs_shrunk": comparisons,
+        "bootstrap_delta_vs_pebs_shrunk": bootstraps,
         "verdict": verdict,
     }
     out_path = Path(args.output_path)

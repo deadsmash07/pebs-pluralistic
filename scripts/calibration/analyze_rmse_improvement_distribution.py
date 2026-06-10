@@ -9,7 +9,7 @@ Outputs
 
 Reviewer-proof questions this addresses
 ---------------------------------------
-1. **Tail risk**: For the 20.8% of users where PILSD LOSES, how much does
+1. **Tail risk**: For the 20.8% of users where PEBS LOSES, how much does
    it lose by? Is there a catastrophic-case user?
 2. **Monotonicity in n**: Do users with more labeled utterances benefit
    more (confirming that the per-user calibration is picking up real
@@ -51,16 +51,16 @@ def main():
     df = pd.read_parquet(args.per_user_parquet)
     print(f"[load] {len(df)} users")
 
-    # Per-user improvements (positive means PILSD is BETTER = smaller RMSE)
-    df["improvement_pilsd_vs_pop_slope"] = df["rmse_pop_slope"] - df["rmse_pilsd"]
-    df["improvement_pilsd_vs_no_calib"] = df["rmse_no_calib"] - df["rmse_pilsd"]
-    df["improvement_rel_pilsd_vs_pop_slope_pct"] = (
-        100 * df["improvement_pilsd_vs_pop_slope"]
+    # Per-user improvements (positive means PEBS is BETTER = smaller RMSE)
+    df["improvement_pebs_vs_pop_slope"] = df["rmse_pop_slope"] - df["rmse_pebs"]
+    df["improvement_pebs_vs_no_calib"] = df["rmse_no_calib"] - df["rmse_pebs"]
+    df["improvement_rel_pebs_vs_pop_slope_pct"] = (
+        100 * df["improvement_pebs_vs_pop_slope"]
         / df["rmse_pop_slope"].replace(0, np.nan)
     )
 
-    imp = df["improvement_pilsd_vs_pop_slope"].to_numpy()
-    imp_rel = df["improvement_rel_pilsd_vs_pop_slope_pct"].to_numpy()
+    imp = df["improvement_pebs_vs_pop_slope"].to_numpy()
+    imp_rel = df["improvement_rel_pebs_vs_pop_slope_pct"].to_numpy()
     n_per_user = df["n"].to_numpy()
 
     # Tail-risk analysis
@@ -68,8 +68,8 @@ def main():
     n_better = int((imp > 0).sum())
     n_tied = int((imp == 0).sum())
     frac_worse = n_worse / len(df)
-    worst_user = df.sort_values("improvement_pilsd_vs_pop_slope").head(5)
-    best_user = df.sort_values("improvement_pilsd_vs_pop_slope").tail(5)
+    worst_user = df.sort_values("improvement_pebs_vs_pop_slope").head(5)
+    best_user = df.sort_values("improvement_pebs_vs_pop_slope").tail(5)
 
     # Percentile bands
     percentiles = [1, 5, 25, 50, 75, 95, 99]
@@ -83,7 +83,7 @@ def main():
     # Monotone trend: bucket users by n_utterances (deciles) and compute
     # mean Δ-RMSE per bucket
     q_bins = pd.qcut(df["n"], q=10, labels=False, duplicates="drop")
-    bucket_means = df.groupby(q_bins)["improvement_pilsd_vs_pop_slope"].mean().to_dict()
+    bucket_means = df.groupby(q_bins)["improvement_pebs_vs_pop_slope"].mean().to_dict()
     bucket_ns = df.groupby(q_bins)["n"].mean().to_dict()
 
     # Normality tests
@@ -103,8 +103,8 @@ def main():
         "mean_n_obs_per_user": float(df["n"].mean()),
         "mean_improvement_absolute": float(np.mean(imp)),
         "mean_improvement_relative_pct": float(np.nanmean(imp_rel)),
-        "frac_users_better_with_pilsd": float(n_better / len(df)),
-        "frac_users_worse_with_pilsd": float(frac_worse),
+        "frac_users_better_with_pebs": float(n_better / len(df)),
+        "frac_users_worse_with_pebs": float(frac_worse),
         "frac_users_tied": float(n_tied / len(df)),
         "percentiles_absolute": imp_pct,
         "percentiles_relative_pct": imp_rel_pct,
@@ -131,10 +131,10 @@ def main():
             "shapiro_wilk_stat": float(sw_stat) if not np.isnan(sw_stat) else None,
             "shapiro_wilk_p": float(sw_p) if not np.isnan(sw_p) else None,
         },
-        "worst_5_users": worst_user[["user_id", "n", "rmse_pop_slope", "rmse_pilsd",
-                                     "improvement_pilsd_vs_pop_slope"]].to_dict("records"),
-        "best_5_users": best_user[["user_id", "n", "rmse_pop_slope", "rmse_pilsd",
-                                   "improvement_pilsd_vs_pop_slope"]].to_dict("records"),
+        "worst_5_users": worst_user[["user_id", "n", "rmse_pop_slope", "rmse_pebs",
+                                     "improvement_pebs_vs_pop_slope"]].to_dict("records"),
+        "best_5_users": best_user[["user_id", "n", "rmse_pop_slope", "rmse_pebs",
+                                   "improvement_pebs_vs_pop_slope"]].to_dict("records"),
     }
 
     Path(args.output_json).parent.mkdir(parents=True, exist_ok=True)
@@ -157,11 +157,11 @@ def main():
                    label=f"mean = {float(np.mean(imp)):.2f}")
         ax.axvline(float(np.median(imp)), color="black", linestyle=":",  linewidth=1.3,
                    label=f"median = {float(np.median(imp)):.2f}")
-        ax.set_xlabel("Per-user Δ-RMSE (pop-slope − PILSD)\n"
-                      "positive = PILSD is better")
+        ax.set_xlabel("Per-user Δ-RMSE (pop-slope − PEBS)\n"
+                      "positive = PEBS is better")
         ax.set_ylabel("Number of users")
         ax.set_title(f"PRISM held-out user-score RMSE:\n"
-                     f"PILSD vs global calibration ({len(df)} users)")
+                     f"PEBS vs global calibration ({len(df)} users)")
         ax.legend(loc="upper left")
         ax.grid(True, alpha=0.25)
 
@@ -188,7 +188,7 @@ def main():
     print(f"  n_users={len(df)}, mean_n_obs/user={df['n'].mean():.1f}")
     print(f"  Δ-RMSE: mean={float(np.mean(imp)):+.3f}  median={float(np.median(imp)):+.3f}")
     print(f"  Relative: mean={float(np.nanmean(imp_rel)):+.2f}%  median={float(np.nanmedian(imp_rel)):+.2f}%")
-    print(f"  Win rate: PILSD better {100*n_better/len(df):.1f}%, "
+    print(f"  Win rate: PEBS better {100*n_better/len(df):.1f}%, "
           f"worse {100*frac_worse:.1f}%, tied {100*n_tied/len(df):.1f}%")
     print(f"  Tails:")
     print(f"    users WORSE by >1 RMSE: {n_lose_gt_1rmse} ({100*n_lose_gt_1rmse/len(df):.1f}%)")

@@ -1,15 +1,15 @@
-"""Parse OASST2 trees.jsonl.gz → per-rater ranking-event dataframe for PILSD.
+"""Parse OASST2 trees.jsonl.gz → per-rater ranking-event dataframe for PEBS.
 
 **Critical**: per-rater `user_id` is ONLY in the raw `trees.jsonl.gz` (inside
 each node's `events` field). The flattened parquet release strips it. See
-memory/oasst2_hidden_annotator_ids.md for the schema discovery.
+the schema-discovery notes.
 
 We extract one row per ranking event:
   user_id, tree_id, parent_message_id, created_date, ranking_parent_id,
   ranked_message_ids (list), ranking (list of ints)
 
 Output: `data/oasst2_rankings.parquet` — the master table for all downstream
-PILSD analyses (cohort filter, anchor-coherence detector, etc.).
+PEBS analyses (cohort filter, anchor-coherence detector, etc.).
 
 Cohort filter applied separately (`scripts/oasst2_cohort_analysis.py`) so the
 full unfiltered data is always preserved.
@@ -19,9 +19,9 @@ Reference:
   - LAION-AI/Open-Assistant `oasst-data/oasst_data/schemas.py`
     specifically `ExportMessageEventRanking` + `ExportMessageNode.events`
 
-Run on H100 (CPU-only, ~1-2 min):
-  source ~/venv_pilsd/bin/activate
-  cd ~/IMPLEMENTATION/3_PILSD_Standalone
+Run (CPU-only, ~1-2 min):
+  source ~/venv_pebs/bin/activate
+  cd ~/IMPLEMENTATION/3_PEBS_Standalone
   python scripts/parse_oasst2_rankings.py --output-dir data
 """
 from __future__ import annotations
@@ -185,7 +185,7 @@ def main():
     cohort = user_stats[(user_stats["n_events"] >= 20) & (user_stats["span_days"] >= 28)]
     cohort_path = out_dir / "oasst2_cohort_users.parquet"
     cohort.to_parquet(cohort_path)
-    print(f"\n=== PILSD Power-User Cohort (N>=20 events, >=28 days span) ===")
+    print(f"\n=== PEBS Power-User Cohort (N>=20 events, >=28 days span) ===")
     print(f"  cohort size:           {len(cohort)} users")
     print(f"  cohort total events:   {cohort['n_events'].sum()}")
     print(f"  cohort mean span:      {cohort['span_days'].mean():.1f} days")

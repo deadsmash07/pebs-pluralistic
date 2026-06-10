@@ -1,5 +1,5 @@
 """Build a per-annotation MultiPref cohort enriched with multiple scalar axes
-for the T3 multi-axis drift scan (iter+N+192).
+for the multi-axis drift scan.
 
 Per-annotation axes emitted (all day-granularity, one row per evaluator x
 comparison annotation):

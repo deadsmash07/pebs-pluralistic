@@ -1,22 +1,20 @@
-"""Q10 — PILSD sample-efficiency curve on PRISM (per-rater n_j sweep).
+"""Q10 — PEBS sample-efficiency curve on PRISM (per-rater n_j sweep).
 
-Per `memory/p0_experiment_queue_v1_2026_05_03.md` Q10 brief:
-**Hypothesis**: PILSD performance scales with N_users-per-rater n_j ∈
+**Hypothesis**: PEBS performance scales with N_users-per-rater n_j ∈
 {3, 5, 10, 20, 50, 100}.
 
-**Why P0**: closes PReF Sec. 4.3 efficiency claim comparison (PReF claims 30×
-data efficiency; PILSD doesn't make this claim but a sample-efficiency curve
-demonstrates closed-form has different scaling). HIGH-leverage SPOTLIGHT-tier
-argument for NeurIPS 2026 because the audience asks "how does your closed-form
-EB calibrator compare on data efficiency vs PReF/LoRe's neural-net feature
-basis?"
+**Why this matters**: PReF (Sec. 4.3) claims 30× data efficiency;
+PEBS doesn't make this claim but a sample-efficiency curve
+demonstrates closed-form has different scaling, answering "how does a
+closed-form EB calibrator compare on data efficiency vs PReF/LoRe's
+neural-net feature basis?"
 
-DESIGN — TWO COMPLEMENTARY AXES (Skill: honest-disclosure §6.3 SCOPE-not-RETRACT)
-================================================================================
+DESIGN — TWO COMPLEMENTARY AXES
+===============================
 
 PRISM's per-user count distribution (computed from
-data/prism_rm_scored.parquet at audit-time): min=4 / max=144 / median=48 /
-mean=49 / 1396 total users. The Q10 brief's literal axis (n_j ∈ {3, 5, 10,
+data/prism_rm_scored.parquet): min=4 / max=144 / median=48 /
+mean=49 / 1396 total users. The literal axis (n_j ∈ {3, 5, 10,
 20, 50, 100}) interpreted as "filter cohort to users with n_j >= n_threshold"
 is nearly INERT for n in {3, 5, 10, 20, 30}: PRISM keeps 1396 / 1395 / 1381 /
 1351 / 1320 users at those thresholds (less than 6% loss). Filter-axis only
@@ -25,93 +23,88 @@ the N_CLUSTERS_FOR_HEADLINE=500 gate). So the FILTER-COHORT axis gives 5
 informative buckets (3, 5, 10, 20, 50) plus 1 cohort-shrunk bucket (100,
 flagged INCONCLUSIVE-COHORT-SHRUNK).
 
-The brief's INTENT — "PILSD scales with n_j per rater" — is more directly
+The design INTENT — "PEBS scales with n_j per rater" — is more directly
 tested by a SUBSAMPLE-PER-USER axis: for each user with n_j >= 2 * n_target
 (so we can still leave at least n_target rows for k=5 CV), randomly subsample
-that user to exactly n_target observations BEFORE running canonical PILSD.
-This directly answers "how much per-rater data does PILSD need to deliver the
+that user to exactly n_target observations BEFORE running canonical PEBS.
+This directly answers "how much per-rater data does PEBS need to deliver the
 8.55% PRISM headline?"
 
 Q10 implements BOTH axes (filter-cohort + subsample-per-user) so the
 sample-efficiency story is reported with the standard cohort-survivability
 bookkeeping AND the more informative per-rater-data-quantity sweep.
 
-4-class STRICT verdict-class per Q10 brief
-==========================================
+Outcome classification
+======================
 
-Operates on the SUBSAMPLE-PER-USER axis (the more informative axis). Per
-Q10 brief literal text:
+Operates on the SUBSAMPLE-PER-USER axis (the more informative axis):
 
-  ESTABLISHED-PILSD-MONOTONE-EFFICIENCY-IMPROVES
+  CONFIRMED-PEBS-MONOTONE-EFFICIENCY-IMPROVES
       iff curve is monotone non-decreasing across n_target ∈ {5, 10, 20, 50}
       AND CI95 is tight at high n_target (CI half-width <= 1.5pp at n=50)
       AND high-n_target gain >= 5pp (consistent with W-B5 PRISM 8.55%
         canonical headline at MIN_OBS=6, projected to median n_j=48 ~ 8pp)
-  MODERATE-PILSD-EFFICIENCY-PARTIAL
+  PARTIAL-PEBS-EFFICIENCY-PARTIAL
       iff some n_target slices straddle 0 OR curve is non-monotone but
       high-n_target slice (n=50) is positive with CI excluding 0
-  PRELIMINARY-INCONCLUSIVE
+  TENTATIVE-INCONCLUSIVE
       iff curve too noisy (3+ adjacent slices with CIs straddling 0)
       OR high-n_target gain < 1pp
-  FALSIFIED-PILSD-FAIL-AT-LOW-N
+  REJECTED-PEBS-FAIL-AT-LOW-N
       iff low-n_target slices (n=3, n=5) show NO gain (CI excludes positive)
       AND high-n_target gain < W-B5 canonical 8.55% by >50% relative
-        (would be HONEST-DISCLOSURE: PILSD's published 8.55% headline is
+        (would be HONEST-DISCLOSURE: PEBS's published 8.55% headline is
         DRIVEN by users with rich data; small-cluster regime degrades — this
         SCOPE-LIMITS the headline claim and is publishable as a calibrated
-        finding per Skill: honest-disclosure §6.3)
+        finding)
 
-12-gate audit (Skill: research-grade-code-audit-pre-launch v1)
-==============================================================
+Design notes
+============
 
-G1 math-vs-code: PILSD math is VERBATIM from
-   `paper/scripts/wave_b/wave_b_W_B5_half_pilsd.py:run_ablation` (the
-   Wave-B5 canonical PRISM PILSD pipeline that produced the W-B5
-   ESTABLISHED-COMPOUND-NEEDED canonical=8.55% headline). Only the OUTER
-   loop (sweep over MIN_OBS or sweep over per-user subsample size) is
-   added; the inner per-fold per-arm computation is byte-identical.
-G2 hypothesis-vs-design: tests "does PILSD gain scale monotonically with
-   per-rater n_j", which IS the Q10 brief's hypothesis. Both axes
-   (filter-cohort, subsample-per-user) are reported; HEADLINE = subsample
-   axis (more informative per design comment above).
-G3 no silent-bypass: 7 distinct compute paths per axis (one per
-   threshold/target). Smoke-test (--smoke) asserts each slice produces
-   distinct (rmse_pilsd, rmse_baseline) values and that the gain monotonic-
-   pattern check fires SOMETHING (either positive or negative).
-G4 eval pipeline integrity: same RMSE-on-held-out-CV-fold metric as W-B5 +
-   Q1 + Q3 + canonical PRISM headline. Cluster-bootstrap by user_id.
-G5 reference-implementation: canonical PILSD inherits from
-   `wave_b_W_B5_half_pilsd.py:run_ablation` (commit-anchored W-B5
-   canonical) which itself is byte-identical to
-   `eval_user_score_mse_shrunk.py` (the published PRISM headline
-   estimator). The subsample-per-user logic is documented as a strict
-   design extension (random sample without replacement; seed-pinned per
-   slice for reproducibility per G8).
-G6 hyperparameter sanity: SEED=20260420, N_BOOT=2000, K_FOLDS=5,
-   thresholds={3, 5, 10, 20, 50, 100} per Q10 brief literal. ddof=1 for
-   sample variance (matches W-B5).
-G7 per-step diagnostic: per-slice (n_users_post_filter,
-   median_n_per_user, tau_alpha_sq, tau_beta_sq, alpha_pop, beta_pop,
-   rmse_no_calib, rmse_baseline, rmse_per_user_ols, rmse_pilsd, gain_pct,
-   ci_bca_lo, ci_bca_hi, ci_excludes_zero, anomaly_branches).
-G8 reproducibility: SEED + per-slice subsample seed (SEED + 1000 *
-   slice_index) + git HEAD persisted + parquet sha256 persisted in
-   summary.json. Subsample is reproducible per slice.
-G9 output schema: 4-class STRICT verdict-class for SUBSAMPLE axis +
-   per-axis per-slice arms parquet + sample-efficiency PLOT (PNG + PDF).
-G10 compute envelope: 12 PILSD runs (6 thresholds × 2 axes) at ~5-15min
-    each on ~1000 users / ~50000 obs ≈ 1-3h CPU on h100_v2_backup. CPU-
-    bound (numpy/scipy); GPU saturation < 5% expected. HONEST-DISCLOSURE:
-    this fills h100_v2_backup post-OASST2 idle slot per cron NEVER-IDLE
-    rule (user 2026-05-02 12:08 IST: "always all gpus must be running
-    p0 experiments"). Cost ~$3 against budgeted ~$5 cap.
-G11 anti-overfitting: not theory-claiming; sample-efficiency curve is a
-    DESCRIPTIVE-DIAGNOSTIC, not a method-superiority claim.
-G12 honest-disclosure: 4-class verdict ENUMERATES the FALSIFIED branch
-    (PILSD fails at low n_j ⇒ headline 8.55% is driven by users with
-    rich data ⇒ scope-limit honest finding); FILTER-COHORT axis at n=100
-    explicitly labeled INCONCLUSIVE-COHORT-SHRUNK rather than reported
-    as a usable comparison; subsample axis is the headline.
+- Math: PEBS math is VERBATIM from
+  `scripts/wave_b/wave_b_W_B5_half_pebs.py:run_ablation` (the
+  Wave-B5 canonical PRISM PEBS pipeline that produced the
+  canonical=8.55% headline). Only the OUTER
+  loop (sweep over MIN_OBS or sweep over per-user subsample size) is
+  added; the inner per-fold per-arm computation is byte-identical.
+- Hypothesis: tests "does PEBS gain scale monotonically with
+  per-rater n_j". Both axes
+  (filter-cohort, subsample-per-user) are reported; HEADLINE = subsample
+  axis (more informative per design comment above).
+- No silent-bypass: 7 distinct compute paths per axis (one per
+  threshold/target). The quick-run test (--smoke) asserts each slice produces
+  distinct (rmse_pebs, rmse_baseline) values and that the gain monotonic-
+  pattern check fires SOMETHING (either positive or negative).
+- Eval pipeline integrity: same RMSE-on-held-out-CV-fold metric as W-B5 +
+  Q1 + Q3 + canonical PRISM headline. Cluster-bootstrap by user_id.
+- Reference implementation: canonical PEBS inherits from
+  `wave_b_W_B5_half_pebs.py:run_ablation`, which itself is byte-identical to
+  `eval_user_score_mse_shrunk.py` (the published PRISM headline
+  estimator). The subsample-per-user logic is documented as a strict
+  design extension (random sample without replacement; seed-pinned per
+  slice for reproducibility).
+- Hyperparameters: SEED=20260420, N_BOOT=2000, K_FOLDS=5,
+  thresholds={3, 5, 10, 20, 50, 100}. ddof=1 for
+  sample variance (matches W-B5).
+- Diagnostics: per-slice (n_users_post_filter,
+  median_n_per_user, tau_alpha_sq, tau_beta_sq, alpha_pop, beta_pop,
+  rmse_no_calib, rmse_baseline, rmse_per_user_ols, rmse_pebs, gain_pct,
+  ci_bca_lo, ci_bca_hi, ci_excludes_zero, anomaly_branches).
+- Reproducibility: SEED + per-slice subsample seed (SEED + 1000 *
+  slice_index) + git HEAD persisted + parquet sha256 persisted in
+  summary.json. Subsample is reproducible per slice.
+- Output schema: subsample-axis outcome +
+  per-axis per-slice arms parquet + sample-efficiency PLOT (PNG + PDF).
+- Compute envelope: 12 PEBS runs (6 thresholds × 2 axes) at ~5-15min
+  each on ~1000 users / ~50000 obs ≈ 1-3h CPU. CPU-bound (numpy/scipy);
+  no GPU needed.
+- The sample-efficiency curve is a
+  DESCRIPTIVE-DIAGNOSTIC, not a method-superiority claim.
+- The decision rule ENUMERATES the REJECTED branch
+  (PEBS fails at low n_j ⇒ headline 8.55% is driven by users with
+  rich data ⇒ scope-limit honest finding); FILTER-COHORT axis at n=100
+  explicitly labeled INCONCLUSIVE-COHORT-SHRUNK rather than reported
+  as a usable comparison; subsample axis is the headline.
 
 Output
 ------
@@ -131,13 +124,13 @@ References
 - Kirk, K. et al. (2024). PRISM: A Diverse Conversation Dataset. NeurIPS
   Datasets and Benchmarks.
 - Shenfeld et al. (2025). PReF. arXiv:2503.06358 — Sec. 4.3 efficiency
-  claim (30× data efficiency over BT baselines; comparison anchor for Q10).
-- W-B5 PRISM canonical PILSD headline (T1 anchor 9c92523/702bc63 verdict
-  ESTABLISHED-COMPOUND-NEEDED canonical=8.55%).
-- Q1 HelpSteer2 (T3 anchor 1826312 verdict ESTABLISHED-HELPSTEER2-CONFIRMS-
-  PRISM gain=+3.700% [+3.346, +4.136]).
-- Q3 PluriHarms (T3 anchor d91aafa verdict ESTABLISHED-COMPOUND-NEEDED
-  canonical=+9.66% [+7.28, +11.19] REVERSED half-arm).
+  claim (30× data efficiency over BT baselines; comparison reference for Q10).
+- W-B5 PRISM canonical PEBS headline (canonical=8.55%;
+  `scripts/wave_b/wave_b_W_B5_half_pebs.py`).
+- Q1 HelpSteer2 (gain=+3.700% [+3.346, +4.136];
+  `scripts/q1_helpsteer2_replication.py`).
+- Q3 PluriHarms (canonical=+9.66% [+7.28, +11.19] REVERSED half-arm;
+  `scripts/q3_half_pebs_cross_corpus.py`).
 """
 from __future__ import annotations
 
@@ -176,22 +169,22 @@ except ImportError as exc:
 # Constants (mirror W-B5 + Q1 + Q3 + canonical PRISM conventions)
 # ============================================================================
 
-ROOT = Path(__file__).resolve().parents[2]                  # 3_PILSD_Standalone/
+ROOT = Path(__file__).resolve().parents[2]                  # 3_PEBS_Standalone/
 T1 = ROOT.parent / "1_Causal_RLHF"
 
 CANONICAL_SEED = 20260420       # matches W-B5 / Q1 / Q3 / PRISM headline
 N_BOOT = 2000                   # matches W-B5 / Q1 / Q3
 RNG_BOOT = 314159               # matches W-B5 / Q3
 K_FOLDS = 5                     # matches W-B5 / Q1 / Q3
-SUBSAMPLE_SEED_OFFSET = 1000    # G8: per-slice subsample seed = SEED + offset * idx
+SUBSAMPLE_SEED_OFFSET = 1000    # per-slice subsample seed = SEED + offset * idx
 
-# G3 numerical-stability guard (verbatim from W-B5 + Q3 + Q9)
+# Numerical-stability guard (verbatim from W-B5 + Q3 + Q9)
 V_ALPHA_BETA_FLOOR = 1e-6
 
-# Q10 brief literal thresholds — used for BOTH axes
+# Sweep thresholds — used for BOTH axes
 Q10_THRESHOLDS = (3, 5, 10, 20, 50, 100)
 
-# 4-class STRICT verdict thresholds (operating on SUBSAMPLE axis headline)
+# Outcome thresholds (operating on SUBSAMPLE axis headline)
 ESTABLISHED_HIGH_N_GAIN_PP = 5.0       # need >=5pp at n=50 (W-B5 canonical 8.55% projected to subsample)
 ESTABLISHED_CI_HALFWIDTH_MAX_PP = 1.5  # CI half-width <= 1.5pp at n=50
 FALSIFIED_LOW_N_GAIN_PP = 0.0          # CI excludes positive at n=3 AND n=5
@@ -202,7 +195,7 @@ N_CLUSTERS_FOR_SLICE_VALID = 100       # per-slice minimum to run cluster-bootst
 
 
 # ============================================================================
-# G8 reproducibility helpers (verbatim from Q9 + Q3)
+# Reproducibility helpers (verbatim from Q9 + Q3)
 # ============================================================================
 
 def file_sha256(p: Path | str) -> str:
@@ -232,15 +225,15 @@ def log(msg: str) -> None:
 
 
 # ============================================================================
-# CORE PILSD MATH (VERBATIM from wave_b_W_B5_half_pilsd.py:run_ablation;
+# CORE PEBS MATH (VERBATIM from wave_b_W_B5_half_pebs.py:run_ablation;
 # only the canonical "both" arm is retained — α-only / β-only ablation is
-# Q10-irrelevant since this script measures PILSD-vs-baseline gain not the
-# half-PILSD decomposition)
+# Q10-irrelevant since this script measures PEBS-vs-baseline gain not the
+# half-PEBS decomposition)
 # ============================================================================
 
 def ols_with_V(x: np.ndarray, y: np.ndarray) -> tuple[float, float, float, float]:
     """Returns (intercept, slope, V_intercept, V_slope) sample-variance estimates.
-    VERBATIM from wave_b_W_B5_half_pilsd.py:130-141 (audit: G1, G5)."""
+    VERBATIM from wave_b_W_B5_half_pebs.py:130-141."""
     k = len(x)
     if k < 2 or np.var(x) < 1e-12:
         return float(np.mean(y)) if k else 0.0, 0.0, np.inf, np.inf
@@ -255,7 +248,7 @@ def ols_with_V(x: np.ndarray, y: np.ndarray) -> tuple[float, float, float, float
 
 
 def kfold_split(n: int, k: int, rng: np.random.Generator):
-    """Random k-fold split. VERBATIM from wave_b_W_B5_half_pilsd.py:116-127."""
+    """Random k-fold split. VERBATIM from wave_b_W_B5_half_pebs.py:116-127."""
     idx = np.arange(n)
     rng.shuffle(idx)
     fold_size = n // k
@@ -271,18 +264,18 @@ def kfold_split(n: int, k: int, rng: np.random.Generator):
 
 def cluster_bootstrap_gain_ci(
     sq_err_baseline: np.ndarray,
-    sq_err_pilsd: np.ndarray,
+    sq_err_pebs: np.ndarray,
     per_row_cluster_idx: list,
     B: int = 2000,
     seed: int = RNG_BOOT,
 ):
     """Cluster-resample-by-cluster bootstrap on gain_pct. Returns BCa + percentile.
 
-    VERBATIM from q9_pooled_4_corpus_pilsd.py:cluster_bootstrap_gain_ci (which
+    VERBATIM from q9_pooled_4_corpus_pebs.py:cluster_bootstrap_gain_ci (which
     itself is verbatim from q1_helpsteer2_replication.py + canonical OASST2
-    eval_oasst2_pilsd_calibrator.py:150-280).
+    eval_oasst2_pebs_calibrator.py:150-280).
     """
-    if len(sq_err_baseline) == 0 or len(sq_err_pilsd) == 0:
+    if len(sq_err_baseline) == 0 or len(sq_err_pebs) == 0:
         return {
             "boot_mean": float("nan"), "boot_sd": float("nan"),
             "ci_percentile_lo": float("nan"), "ci_percentile_hi": float("nan"),
@@ -307,7 +300,7 @@ def cluster_bootstrap_gain_ci(
             continue
         idx_arr = np.array(flat)
         sb = sq_err_baseline[idx_arr]
-        sp = sq_err_pilsd[idx_arr]
+        sp = sq_err_pebs[idx_arr]
         rb = math.sqrt(sb.mean()) if sb.size else 0.0
         rp = math.sqrt(sp.mean()) if sp.size else 0.0
         if rb > 0:
@@ -329,8 +322,8 @@ def cluster_bootstrap_gain_ci(
     pct_hi = float(np.quantile(boot_arr, 0.975))
 
     rmse_base_obs = math.sqrt(sq_err_baseline.mean())
-    rmse_pilsd_obs = math.sqrt(sq_err_pilsd.mean())
-    obs_gain = ((rmse_base_obs - rmse_pilsd_obs) / rmse_base_obs * 100.0
+    rmse_pebs_obs = math.sqrt(sq_err_pebs.mean())
+    obs_gain = ((rmse_base_obs - rmse_pebs_obs) / rmse_base_obs * 100.0
                 if rmse_base_obs > 0 else 0.0)
 
     p_below = float(np.mean(boot_arr < obs_gain))
@@ -343,7 +336,7 @@ def cluster_bootstrap_gain_ci(
         if not flat:
             continue
         sb_jk = sq_err_baseline[np.array(flat)]
-        sp_jk = sq_err_pilsd[np.array(flat)]
+        sp_jk = sq_err_pebs[np.array(flat)]
         rb_jk = math.sqrt(sb_jk.mean()) if sb_jk.size else 0.0
         rp_jk = math.sqrt(sp_jk.mean()) if sp_jk.size else 0.0
         if rb_jk > 0:
@@ -388,14 +381,14 @@ def cluster_bootstrap_gain_ci(
 
 
 # ============================================================================
-# CANONICAL PILSD slice-runner (one slice per (axis, threshold))
+# CANONICAL PEBS slice-runner (one slice per (axis, threshold))
 #
-# Returns dict with rmse_baseline, rmse_pilsd, gain_pct, CI, n_users,
+# Returns dict with rmse_baseline, rmse_pebs, gain_pct, CI, n_users,
 # anomaly_branches. SAME inner pipeline as W-B5 (verbatim except outer
 # slice-conditioning).
 # ============================================================================
 
-def run_canonical_pilsd_on_df(
+def run_canonical_pebs_on_df(
     df: pd.DataFrame,
     seed: int,
     k_folds: int,
@@ -403,11 +396,11 @@ def run_canonical_pilsd_on_df(
     n_boot: int,
     bootstrap_seed: int,
 ) -> dict[str, Any]:
-    """Run canonical PILSD pipeline on the input slice df.
+    """Run canonical PEBS pipeline on the input slice df.
 
-    Inner pipeline VERBATIM from wave_b_W_B5_half_pilsd.py:run_ablation
+    Inner pipeline VERBATIM from wave_b_W_B5_half_pebs.py:run_ablation
     (canonical "both" arm). Differences vs W-B5: only canonical arm reported
-    (α-only / β-only is W-B5's headline; Q10 measures PILSD-vs-baseline gain).
+    (α-only / β-only is W-B5's headline; Q10 measures PEBS-vs-baseline gain).
 
     Args
     ----
@@ -476,9 +469,9 @@ def run_canonical_pilsd_on_df(
     tau_a_sq = max(V_alpha_total - mean_samp_V_alpha, 1e-6)
     tau_b_sq = max(V_beta_total - mean_samp_V_beta, 1e-6)
 
-    # K-fold within-user CV (canonical PILSD arm only)
+    # K-fold within-user CV (canonical PEBS arm only)
     sq_err_baseline_per_row = []
-    sq_err_pilsd_per_row = []
+    sq_err_pebs_per_row = []
     sq_err_no_calib_per_row = []
     sq_err_per_user_ols_per_row = []
     per_row_cluster: list = []
@@ -514,13 +507,13 @@ def run_canonical_pilsd_on_df(
             sq_err_no_calib_per_row.extend(((y_hat_nc - y_te) ** 2).tolist())
             sq_err_baseline_per_row.extend(((y_hat_ps - y_te) ** 2).tolist())
             sq_err_per_user_ols_per_row.extend(((y_hat_ols - y_te) ** 2).tolist())
-            sq_err_pilsd_per_row.extend(((y_hat_sh - y_te) ** 2).tolist())
+            sq_err_pebs_per_row.extend(((y_hat_sh - y_te) ** 2).tolist())
             per_row_cluster.extend([uid] * len(y_te))
 
     sq_err_no_calib = np.asarray(sq_err_no_calib_per_row)
     sq_err_baseline = np.asarray(sq_err_baseline_per_row)
     sq_err_per_user = np.asarray(sq_err_per_user_ols_per_row)
-    sq_err_pilsd = np.asarray(sq_err_pilsd_per_row)
+    sq_err_pebs = np.asarray(sq_err_pebs_per_row)
 
     if len(sq_err_baseline) == 0:
         return {
@@ -533,13 +526,13 @@ def run_canonical_pilsd_on_df(
     rmse_no_calib = float(np.sqrt(sq_err_no_calib.mean())) if len(sq_err_no_calib) else float("nan")
     rmse_baseline = float(np.sqrt(sq_err_baseline.mean()))
     rmse_per_user = float(np.sqrt(sq_err_per_user.mean())) if len(sq_err_per_user) else float("nan")
-    rmse_pilsd = float(np.sqrt(sq_err_pilsd.mean()))
-    gain_pct = ((rmse_baseline - rmse_pilsd) / rmse_baseline * 100.0
+    rmse_pebs = float(np.sqrt(sq_err_pebs.mean()))
+    gain_pct = ((rmse_baseline - rmse_pebs) / rmse_baseline * 100.0
                 if rmse_baseline > 0 else float("nan"))
 
     # Cluster-bootstrap CI on slice gain_pct
     bs = cluster_bootstrap_gain_ci(
-        sq_err_baseline, sq_err_pilsd, per_row_cluster,
+        sq_err_baseline, sq_err_pebs, per_row_cluster,
         B=n_boot, seed=bootstrap_seed,
     )
 
@@ -552,8 +545,8 @@ def run_canonical_pilsd_on_df(
     anomalies = []
     if not np.isfinite(gain_pct):
         anomalies.append("nan_gain_pct")
-    if rmse_pilsd >= rmse_baseline:
-        anomalies.append("pilsd_rmse_at_or_above_baseline")
+    if rmse_pebs >= rmse_baseline:
+        anomalies.append("pebs_rmse_at_or_above_baseline")
     if not np.isfinite(ci_lo) or not np.isfinite(ci_hi):
         anomalies.append("ci_degenerate")
     if n_users_post_filter < N_CLUSTERS_FOR_SLICE_VALID:
@@ -571,7 +564,7 @@ def run_canonical_pilsd_on_df(
         "rmse_no_calib": rmse_no_calib,
         "rmse_baseline": rmse_baseline,
         "rmse_per_user_ols": rmse_per_user,
-        "rmse_pilsd": rmse_pilsd,
+        "rmse_pebs": rmse_pebs,
         "gain_pct": gain_pct,
         "ci_bca_lo": ci_lo,
         "ci_bca_hi": ci_hi,
@@ -598,7 +591,7 @@ def axis_filter_cohort(
     """Sweep filter-cohort axis: at each threshold T, keep users with n_j >= T.
 
     For each threshold, requires K_FOLDS+1 (=6) obs/user as the secondary
-    guard so the k-fold CV can produce >=1 test row per user. Q10 brief
+    guard so the k-fold CV can produce >=1 test row per user. The design
     thresholds {3, 5, 10, 20, 50, 100} but k=5 CV requires each user keeps
     at least k+1=6 rows; for thresholds 3 and 5 we boost the secondary
     guard to 6 (so the user-survivability cohort is the W-B5 canonical
@@ -616,7 +609,7 @@ def axis_filter_cohort(
         secondary_guard = max(thr, k_folds + 1)
         slice_df = df.copy()
         per_slice_seed = seed + SUBSAMPLE_SEED_OFFSET * idx
-        result = run_canonical_pilsd_on_df(
+        result = run_canonical_pebs_on_df(
             slice_df,
             seed=per_slice_seed,
             k_folds=k_folds,
@@ -648,8 +641,8 @@ def axis_filter_cohort(
 #
 # For each n_target, for each user with n_j >= 2*n_target (so post-subsample
 # user retains n_target rows AND has K_FOLDS+1 for CV validity), sample
-# n_target rows WITHOUT replacement from that user. PILSD then runs on the
-# subsampled slice. This is the more direct test of "PILSD sample efficiency
+# n_target rows WITHOUT replacement from that user. PEBS then runs on the
+# subsampled slice. This is the more direct test of "PEBS sample efficiency
 # scales with per-rater n_j" because the per-user information content is
 # directly clamped to n_target.
 #
@@ -682,7 +675,7 @@ def axis_subsample_per_user(
     K_FOLDS+1 = 6 for k=5 CV. So n_target=3 and n_target=5 are below the
     k-fold validity floor and we DROP them with an explicit anomaly tag
     (k_folds_validity_violation) rather than running a degenerate slice.
-    Honest disclosure: this asymmetrically weakens the FALSIFIED-PILSD-
+    Honest disclosure: this asymmetrically weakens the REJECTED-PEBS-
     FAIL-AT-LOW-N branch (we cannot test n_target ∈ {3, 5} for PRISM with
     k=5 CV; we report the n_target=10 slice as the "low-n" anchor instead).
     """
@@ -719,7 +712,7 @@ def axis_subsample_per_user(
             sub_pieces.append(grp.loc[chosen])
         sub_df = pd.concat(sub_pieces, ignore_index=True)
         log(f"[subsample n={n_target}] {len(keep_users)} users post-gate, {len(sub_df)} obs post-subsample")
-        # Run canonical PILSD on subsampled slice
+        # Run canonical PEBS on subsampled slice
         # Secondary guard: max(n_target, k_folds+1). For n_target<6 we can't
         # k-fold so we'd skip; gate=2*n_target ensures n_target>=ceil(2*5/5)=2
         # is achievable in principle, but k-fold needs n_target>=6. So:
@@ -737,7 +730,7 @@ def axis_subsample_per_user(
                 "anomaly_branches": [f"k_folds_validity_violation_n_target_{n_target}"],
             })
             continue
-        result = run_canonical_pilsd_on_df(
+        result = run_canonical_pebs_on_df(
             sub_df,
             seed=per_slice_seed,
             k_folds=k_folds,
@@ -766,24 +759,24 @@ def axis_subsample_per_user(
 
 
 # ============================================================================
-# Verdict assignment per Q10 brief 4-class STRICT (operates on subsample axis)
+# Outcome assignment (operates on subsample axis)
 # ============================================================================
 
 def assign_verdict(
     subsample_results: list[dict[str, Any]],
 ) -> dict[str, Any]:
-    """Per Q10 brief 4-class STRICT (operates on subsample axis HEADLINE).
+    """Pre-specified outcome classification (operates on subsample axis HEADLINE).
 
     Decision-rule:
-      ESTABLISHED-PILSD-MONOTONE-EFFICIENCY-IMPROVES
+      CONFIRMED-PEBS-MONOTONE-EFFICIENCY-IMPROVES
         iff curve monotone non-decreasing across n_target ∈ valid-slices
         AND CI half-width <= 1.5pp at highest valid n_target
         AND highest valid n_target gain >= 5pp
-      MODERATE-PILSD-EFFICIENCY-PARTIAL
+      PARTIAL-PEBS-EFFICIENCY-PARTIAL
         iff some slices straddle 0 OR non-monotone but high-n positive (CI excl 0)
-      PRELIMINARY-INCONCLUSIVE
+      TENTATIVE-INCONCLUSIVE
         iff 3+ adjacent slices with CIs straddling 0 OR high-n gain < 1pp
-      FALSIFIED-PILSD-FAIL-AT-LOW-N
+      REJECTED-PEBS-FAIL-AT-LOW-N
         iff low-n slices show NO gain (CI excludes positive)
         AND high-n_target gain < W-B5 canonical 8.55% by >50% relative
     """
@@ -794,7 +787,7 @@ def assign_verdict(
              and np.isfinite(r.get("ci_bca_lo", float("nan")))]
     if len(valid) == 0:
         return {
-            "verdict_class": "PRELIMINARY-INCONCLUSIVE-NO-VALID-SLICES",
+            "verdict_class": "TENTATIVE-INCONCLUSIVE-NO-VALID-SLICES",
             "decision_rule": "no valid subsample slices on this corpus",
             "n_valid_slices": 0,
         }
@@ -829,19 +822,19 @@ def assign_verdict(
     # High-n slice = highest threshold valid slice
     high_n_gain = gains[-1]
 
-    # FALSIFIED branch
+    # REJECTED branch
     low_n_no_gain = (low_n_ci_hi <= FALSIFIED_LOW_N_GAIN_PP) or low_n_gain < 0
     high_n_below_50pct_canonical = high_n_gain < FALSIFIED_HIGH_N_GAIN_PP
     if low_n_no_gain and high_n_below_50pct_canonical:
-        verdict = "FALSIFIED-PILSD-FAIL-AT-LOW-N"
+        verdict = "REJECTED-PEBS-FAIL-AT-LOW-N"
     elif (
         is_monotone
         and ci_halfwidth_high <= ESTABLISHED_CI_HALFWIDTH_MAX_PP
         and high_n_gain >= ESTABLISHED_HIGH_N_GAIN_PP
     ):
-        verdict = "ESTABLISHED-PILSD-MONOTONE-EFFICIENCY-IMPROVES"
+        verdict = "CONFIRMED-PEBS-MONOTONE-EFFICIENCY-IMPROVES"
     elif max_run >= INCONCLUSIVE_NOISY_SLICE_COUNT or high_n_gain < 1.0:
-        verdict = "PRELIMINARY-INCONCLUSIVE"
+        verdict = "TENTATIVE-INCONCLUSIVE"
     elif (
         # Some straddle but high-n positive with CI excluding 0
         any(ci_straddles_zero)
@@ -851,9 +844,9 @@ def assign_verdict(
         not is_monotone
         and ci_los[-1] > 0
     ):
-        verdict = "MODERATE-PILSD-EFFICIENCY-PARTIAL"
+        verdict = "PARTIAL-PEBS-EFFICIENCY-PARTIAL"
     else:
-        verdict = "PRELIMINARY-INCONCLUSIVE"
+        verdict = "TENTATIVE-INCONCLUSIVE"
 
     return {
         "verdict_class": verdict,
@@ -869,11 +862,11 @@ def assign_verdict(
         "low_n_ci_hi": float(low_n_ci_hi),
         "max_adjacent_straddle_run": int(max_run),
         "decision_rule": (
-            "ESTABLISHED if curve monotone (within 0.5pp slack) + CI half-"
-            "width<=1.5pp at high-n + high-n gain>=5pp; FALSIFIED if low-n "
+            "CONFIRMED if curve monotone (within 0.5pp slack) + CI half-"
+            "width<=1.5pp at high-n + high-n gain>=5pp; REJECTED if low-n "
             "CI excludes positive AND high-n gain<50% of W-B5 canonical "
-            "8.55%; PRELIMINARY if 3+ adjacent CI-straddling slices OR "
-            "high-n gain<1pp; MODERATE otherwise (some straddle BUT high-"
+            "8.55%; TENTATIVE if 3+ adjacent CI-straddling slices OR "
+            "high-n gain<1pp; PARTIAL otherwise (some straddle BUT high-"
             "n positive with CI excluding 0; OR non-monotone but high-n "
             "positive)."
         ),
@@ -932,13 +925,13 @@ def make_sample_efficiency_plot(
     ax.axhline(0.0, color="gray", lw=0.6, ls="-", alpha=0.5)
 
     ax.set_xlabel("Per-rater observation threshold $T$ (log scale)", fontsize=11)
-    ax.set_ylabel("PILSD gain over pop-slope baseline (%)", fontsize=11)
+    ax.set_ylabel("PEBS gain over pop-slope baseline (%)", fontsize=11)
     ax.set_xscale("log")
     ax.set_xticks([3, 5, 10, 20, 50, 100])
     ax.set_xticklabels(["3", "5", "10", "20", "50", "100"])
     ax.grid(True, alpha=0.3, which="both")
     ax.legend(fontsize=9, loc="lower right", framealpha=0.9)
-    title = f"Q10 PILSD sample-efficiency curve on PRISM (verdict: {verdict})"
+    title = f"Q10 PEBS sample-efficiency curve on PRISM (verdict: {verdict})"
     ax.set_title(title, fontsize=11)
     fig.tight_layout()
 
@@ -980,26 +973,16 @@ def main() -> int:
         "experiment_id": "Q10_sample_efficiency_curve",
         "verdict_class": "PENDING",
         "args": vars(args),
-        "skill_citations": [
-            "Skill: research-grade-code-audit-pre-launch v1 G1-G12",
-            "Skill: honest-disclosure 4-class STRICT",
-            "Skill: post-experiment-discipline-3-track Step 4-7",
-            "Skill: launch-runpod-h100-job (h100_v2_backup)",
-            "Skill: gpu-artifact-sync",
-            "Skill: icml-neurips-critical-reviewer-2026 Pass 5 (sample-efficiency)",
-            "Skill: research-paper-adversarial-review-icml-neurips (PReF Sec. 4.3 attack closure)",
-        ],
         "anchors": {
-            "w_b5_prism_canonical": "ESTABLISHED-COMPOUND-NEEDED canonical=8.55%",
-            "pref_sec_4_3_efficiency_claim": "Shenfeld et al. 2025 arXiv:2503.06358 — PReF claims 30x BT data efficiency; PILSD comparison via sample-efficiency curve",
-            "q10_brief": "memory/p0_experiment_queue_v1_2026_05_03.md Q10",
+            "w_b5_prism_canonical": "canonical=8.55%",
+            "pref_sec_4_3_efficiency_claim": "Shenfeld et al. 2025 arXiv:2503.06358 — PReF claims 30x BT data efficiency; PEBS comparison via sample-efficiency curve",
         },
         "honest_disclosure_design_notes": (
             "Q10 implements TWO complementary axes on PRISM: (A) filter-"
             "cohort axis varies user-cohort by n_j threshold; (B) subsample-"
             "per-user axis randomly subsamples each user to exactly n_target "
             "rows. The subsample axis is the HEADLINE because it directly "
-            "tests the brief's hypothesis 'PILSD scales with n_j per rater'. "
+            "tests the hypothesis 'PEBS scales with n_j per rater'. "
             "PRISM's per-user count distribution (median n_j=48; max=144; "
             "min=4) means: filter axis is nearly inert at low thresholds "
             "(>=1320 users at thr in {3,5,10,20,30}); subsample axis at "
@@ -1009,8 +992,8 @@ def main() -> int:
             "n_target ∈ {3, 5} below k=5 CV validity floor (k+1=6 rows "
             "needed) ⇒ INCONCLUSIVE-K-FOLD-VALIDITY explicit branch. "
             "Informative subsample slices: n_target ∈ {10, 20}; informative "
-            "filter slices: thr ∈ {3, 5, 10, 20, 50}. The 4-class STRICT "
-            "verdict operates on subsample axis valid slices only; filter "
+            "filter slices: thr ∈ {3, 5, 10, 20, 50}. The "
+            "outcome operates on subsample axis valid slices only; filter "
             "axis is reported as DIAGNOSTIC for cohort-survivability "
             "comparison."
         ),
@@ -1037,7 +1020,7 @@ def main() -> int:
         return 1
 
     if args.smoke:
-        # Smoke: 50 users + n_boot=200 (G3 — fast validation; mainly tests structure)
+        # Smoke: 50 users + n_boot=200 (fast validation; mainly tests structure)
         keep_users = prism_df.user_id.drop_duplicates().head(80).tolist()
         prism_df = prism_df[prism_df.user_id.isin(keep_users)].reset_index(drop=True)
         n_boot_eff = 200
@@ -1075,7 +1058,7 @@ def main() -> int:
     # Phase 4 — Verdict assignment (operates on subsample axis)
     verdict = assign_verdict(subsample_results)
 
-    # Phase 5 — Per-slice arms parquet (compact for paper-trail)
+    # Phase 5 — Per-slice arms parquet (compact, for downstream analysis)
     arm_rows = []
     for r in filter_results + subsample_results:
         arm_rows.append({
@@ -1084,7 +1067,7 @@ def main() -> int:
             "n_users_post_filter": r.get("n_users_post_filter", 0),
             "median_n_per_user": r.get("median_n_per_user", float("nan")),
             "rmse_baseline": r.get("rmse_baseline", float("nan")),
-            "rmse_pilsd": r.get("rmse_pilsd", float("nan")),
+            "rmse_pebs": r.get("rmse_pebs", float("nan")),
             "gain_pct": r.get("gain_pct", float("nan")),
             "ci_bca_lo": r.get("ci_bca_lo", float("nan")),
             "ci_bca_hi": r.get("ci_bca_hi", float("nan")),
@@ -1121,7 +1104,7 @@ def main() -> int:
     summary_path.write_text(json.dumps(summary, indent=2, default=str))
 
     print()
-    print(f"=== Q10 PILSD sample-efficiency curve on PRISM ===")
+    print(f"=== Q10 PEBS sample-efficiency curve on PRISM ===")
     print(f"verdict_class : {summary['verdict_class']}")
     print(f"n_valid_subsample_slices: {verdict.get('n_valid_slices', 0)}")
     print(f"thresholds_in_curve: {verdict.get('thresholds_in_curve', [])}")

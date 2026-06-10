@@ -1,4 +1,4 @@
-"""Score PILSD-calibrated Qwen2.5 reward model against RewardBench 2.
+"""Score PEBS-calibrated Qwen2.5 reward model against RewardBench 2.
 
 First downstream evaluation for Track 1's Qwen2.5-7B PRISM RM. RewardBench 2
 (Lambert et al. 2025, arXiv:2506.01937) scores RMs on a best-of-4 leaderboard:
@@ -8,15 +8,15 @@ designated gold answer.
 Categories: Factuality, Precise Instruction Following, Math, Safety, Focus, Ties.
 
 Crucial limitation (documented in DOC_REWARDBENCH2.md):
-  RewardBench 2 prompts have NO annotator_id -- PILSD's per-user calibrator
+  RewardBench 2 prompts have NO annotator_id -- PEBS's per-user calibrator
   cannot be applied directly. This script supports four --shrinkage-mode
-  settings to test what PILSD's POPULATION-SLOPE contribution buys us:
+  settings to test what PEBS's POPULATION-SLOPE contribution buys us:
     - none             : no calibration applied (raw RM logits, top-1 rank)
     - vanilla          : alias for 'none'; names the baseline-RM arm
-    - pilsd_pop_slope  : apply population alpha, beta from REML MixedLM fit
-    - pilsd_shrunk     : per-user alpha_j, beta_j if user_id is present (falls
+    - pebs_pop_slope  : apply population alpha, beta from REML MixedLM fit
+    - pebs_shrunk     : per-user alpha_j, beta_j if user_id is present (falls
                          back to pop-slope for unseen users). On RewardBench 2
-                         this equals pilsd_pop_slope because prompts lack user_id.
+                         this equals pebs_pop_slope because prompts lack user_id.
 
 Note that top-1 selection on a SINGLE user's calibration is monotone-invariant
 to (alpha_j, beta_j) -- so calibration only matters when scores are compared
@@ -25,14 +25,14 @@ downstream into a PPO reward normalizer. RewardBench 2 measures the former
 indirectly: a population calibration that shifts mean score does not change
 within-prompt argmax. This script's main value is therefore:
   (1) a leaderboard-comparable held-out RM score for paper table T1
-  (2) a sanity check that LoRA + PILSD did not break the RM's ranking ability
-  (3) an ablation: measure category-wise perf of vanilla vs PILSD-calibrated RM
+  (2) a sanity check that LoRA + PEBS did not break the RM's ranking ability
+  (3) an ablation: measure category-wise perf of vanilla vs PEBS-calibrated RM
 
 References:
   - Lambert et al. 2025 'RewardBench 2' (arXiv:2506.01937)
   - Lambert et al. 2024 'Tulu 3' (arXiv:2411.15124)
   - Kirk et al. 2024 NeurIPS D&B PRISM (user-id source)
-  - Gelman & Hill 2007 Section 12 (partial-pooling framework behind PILSD)
+  - Gelman & Hill 2007 Section 12 (partial-pooling framework behind PEBS)
   - allenai/reward-bench GitHub (scripts/run_v2.py reference impl)
 
 Example (H100):
@@ -41,8 +41,8 @@ Example (H100):
         --adapter-path ~/IMPLEMENTATION/1_Causal_RLHF/results/e2_canonical_7b \\
         --calibrators-parquet data/prism_user_calibrators_shrunk.parquet \\
         --pop-alpha 66.48 --pop-beta 14.37 \\
-        --output-json results/rewardbench2_pilsd.json \\
-        --shrinkage-mode pilsd_pop_slope \\
+        --output-json results/rewardbench2_pebs.json \\
+        --shrinkage-mode pebs_pop_slope \\
         --batch-size 8
 """
 from __future__ import annotations
@@ -61,7 +61,7 @@ import numpy as np
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-SHRINKAGE_MODES = ("none", "vanilla", "pilsd_shrunk", "pilsd_pop_slope")
+SHRINKAGE_MODES = ("none", "vanilla", "pebs_shrunk", "pebs_pop_slope")
 
 # RewardBench 2 official category list. Source: dataset card + run_v2.py in
 # allenai/reward-bench. "Ties" is scored differently from best-of-4 (see paper
@@ -94,8 +94,8 @@ def parse_args():
     )
     p.add_argument(
         "--calibrators-parquet", default=None,
-        help="Optional PILSD per-user calibrators parquet (columns: user_id, "
-             "alpha_j, beta_j, ...). If absent AND mode != pilsd_pop_slope, "
+        help="Optional PEBS per-user calibrators parquet (columns: user_id, "
+             "alpha_j, beta_j, ...). If absent AND mode != pebs_pop_slope, "
              "the script falls back to pop-slope using --pop-alpha/--pop-beta.",
     )
     p.add_argument(
@@ -195,7 +195,7 @@ def apply_calibration(
     user_id: Optional[str],
     calibrators: Optional[Dict[str, Tuple[float, float]]],
 ) -> np.ndarray:
-    """Apply PILSD calibration.
+    """Apply PEBS calibration.
 
     Calibration model (Gelman & Hill section 12 partial-pooling):
         rating_ij = alpha_j + beta_j * (M_i - M_bar) + eps
@@ -213,10 +213,10 @@ def apply_calibration(
     if mode in ("none", "vanilla"):
         return raw_scores.astype(np.float64)
 
-    if mode == "pilsd_pop_slope":
+    if mode == "pebs_pop_slope":
         return pop_alpha + pop_beta * raw_scores.astype(np.float64)
 
-    if mode == "pilsd_shrunk":
+    if mode == "pebs_shrunk":
         # Per-user if available, else population fallback
         if user_id is not None and calibrators is not None and user_id in calibrators:
             alpha_j, beta_j = calibrators[user_id]
@@ -441,18 +441,18 @@ def main() -> int:
     print(f"[rb2] device={device}")
     print(f"[rb2] categories={categories}")
 
-    if args.shrinkage_mode in ("pilsd_shrunk", "pilsd_pop_slope"):
+    if args.shrinkage_mode in ("pebs_shrunk", "pebs_pop_slope"):
         if args.pop_alpha is None or args.pop_beta is None:
             raise ValueError(
-                "--pop-alpha and --pop-beta required for PILSD modes "
+                "--pop-alpha and --pop-beta required for PEBS modes "
                 "(from track1_tau_comparison.json pop_intercept/pop_slope)"
             )
 
     calibrators = load_calibrators(args.calibrators_parquet)
     if calibrators is not None:
         print(f"[rb2] loaded {len(calibrators)} per-user calibrators")
-    elif args.shrinkage_mode == "pilsd_shrunk":
-        print("[rb2] WARNING: pilsd_shrunk requested but no calibrators parquet; "
+    elif args.shrinkage_mode == "pebs_shrunk":
+        print("[rb2] WARNING: pebs_shrunk requested but no calibrators parquet; "
               "all users will fall back to pop-slope")
 
     if args.dry_run:

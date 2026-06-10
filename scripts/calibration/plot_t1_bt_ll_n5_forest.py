@@ -1,4 +1,4 @@
-"""Research-grade n=5 forest plot of per-seed BT-LL deltas (PILSD - vanilla)
+"""Research-grade n=5 forest plot of per-seed BT-LL deltas (PEBS - vanilla)
 with paired-t 95% CI and across-seed summary diamond.
 
 Reads the output of aggregate_7b_ppo_results.py (aggregate_n5.json) and writes a
@@ -67,7 +67,7 @@ def main():
     ax.set_yticks(list(y) + [dy])
     ax.set_yticklabels([f"seed {s}" for s in seeds_s] + ["pooled (n=5)"])
     ax.invert_yaxis()
-    ax.set_xlabel(r"$\Delta$ BT-LL = PILSD $-$ vanilla (×10$^{-4}$ nats)")
+    ax.set_xlabel(r"$\Delta$ BT-LL = PEBS $-$ vanilla (×10$^{-4}$ nats)")
     title = (f"T1.MI BT-LL forest (n={n} seeds, 500 held-out pairs/seed)\n"
              f"pooled $\\Delta$ = {mean_delta:+.2e}, 95% CI [{ci_lo:+.2e}, {ci_hi:+.2e}]\n"
              f"paired-t p = {p:.3f}, Wilcoxon p = {wp:.3f} -- null consistent with "

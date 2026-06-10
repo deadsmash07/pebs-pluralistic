@@ -1,14 +1,14 @@
-"""Assemble the 3-backbone x 2-corpus PILSD matrix from per-user parquets.
+"""Assemble the 3-backbone x 2-corpus PEBS matrix from per-user parquets.
 
 Reads:
-  - `results/track1_llama32_3b_rm/pilsd_3backbone_eval.parquet`  (PRISM, iter+N+235)
-  - `results/pluriharms_pilsd_3backbones.parquet`                (new, this iter)
+  - `results/track1_llama32_3b_rm/pebs_3backbone_eval.parquet`  (PRISM)
+  - `results/pluriharms_pebs_3backbones.parquet`                (new, this iter)
 
-For each (backbone, corpus) cell, computes the PILSD-vs-pop-slope relative
+For each (backbone, corpus) cell, computes the PEBS-vs-pop-slope relative
 improvement with cluster-bootstrap 95% CI (users as clusters, 2000 reps).
 Emits:
-  - `results/pilsd_3x2_matrix.json`
-  - `results/pilsd_3x2_matrix.md`
+  - `results/pebs_3x2_matrix.json`
+  - `results/pebs_3x2_matrix.md`
   - `paper/figures/fig_18_t1_3backbone_2corpus_matrix.pdf` (serif, 300 dpi)
   - `PAPER_INSERT_3x2_matrix.tex`
 """
@@ -33,10 +33,10 @@ except Exception:
     cluster_bootstrap = None
 
 
-PRISM_PARQUET = ROOT / "results/track1_llama32_3b_rm/pilsd_3backbone_eval.parquet"
-PLURI_PARQUET = ROOT / "results/pluriharms_pilsd_3backbones.parquet"
-OUT_JSON = ROOT / "results/pilsd_3x2_matrix.json"
-OUT_MD = ROOT / "results/pilsd_3x2_matrix.md"
+PRISM_PARQUET = ROOT / "results/track1_llama32_3b_rm/pebs_3backbone_eval.parquet"
+PLURI_PARQUET = ROOT / "results/pluriharms_pebs_3backbones.parquet"
+OUT_JSON = ROOT / "results/pebs_3x2_matrix.json"
+OUT_MD = ROOT / "results/pebs_3x2_matrix.md"
 FIG_PDF = ROOT / "paper/figures/fig_18_t1_3backbone_2corpus_matrix.pdf"
 TEX_INSERT = ROOT / "PAPER_INSERT_3x2_matrix.tex"
 
@@ -51,7 +51,7 @@ BACKBONE_LABELS = {
 def cell_gain_ci(pu: pd.DataFrame, name: str, n_boot: int = 2000,
                  seed: int = 42) -> dict:
     col_pop = f"rmse_pop_slope_{name}"
-    col_shr = f"rmse_pilsd_shrunk_{name}"
+    col_shr = f"rmse_pebs_shrunk_{name}"
     if col_pop not in pu.columns or col_shr not in pu.columns:
         return {}
     ids = pu["user_id"].to_numpy()
@@ -80,7 +80,7 @@ def cell_gain_ci(pu: pd.DataFrame, name: str, n_boot: int = 2000,
     return {
         "n_users": int(len(pu)),
         "rmse_pop": float(pop.mean()),
-        "rmse_pilsd": float(shr.mean()),
+        "rmse_pebs": float(shr.mean()),
         "gain_pct_point": float(point),
         "gain_pct_boot_mean": float(boots.mean()),
         "gain_pct_lo95": float(lo),
@@ -123,9 +123,9 @@ def main():
     print(f"[save] {OUT_JSON}")
 
     # --- Markdown table ---
-    md = ["# PILSD 3-backbone x 2-corpus matrix\n"]
+    md = ["# PEBS 3-backbone x 2-corpus matrix\n"]
     md.append(f"**All 6 cells CI>0**: `{all_pos}`\n")
-    md.append("| Backbone | Corpus | n_users | pop-RMSE | PILSD-RMSE | "
+    md.append("| Backbone | Corpus | n_users | pop-RMSE | PEBS-RMSE | "
               "Gain % [95% CI] | CI>0 |")
     md.append("|---|---|---:|---:|---:|---|:---:|")
     for name in BACKBONES:
@@ -137,7 +137,7 @@ def main():
             c = matrix[key]
             md.append(
                 f"| {BACKBONE_LABELS[name]} | {corpus} | {c['n_users']} | "
-                f"{c['rmse_pop']:.3f} | {c['rmse_pilsd']:.3f} | "
+                f"{c['rmse_pop']:.3f} | {c['rmse_pebs']:.3f} | "
                 f"{c['gain_pct_point']:+.2f}%  [{c['gain_pct_lo95']:+.2f}, "
                 f"{c['gain_pct_hi95']:+.2f}] | "
                 f"{'yes' if c['ci_strictly_positive'] else 'NO'} |"
@@ -200,8 +200,8 @@ def main():
     ax.axhline(0, color="black", linewidth=0.6)
     ax.set_xticks(x)
     ax.set_xticklabels([BACKBONE_LABELS[n] for n in BACKBONES])
-    ax.set_ylabel("PILSD RMSE reduction vs pop-slope (%)")
-    ax.set_title("PILSD backbone x corpus generality "
+    ax.set_ylabel("PEBS RMSE reduction vs pop-slope (%)")
+    ax.set_title("PEBS backbone x corpus generality "
                  "(within-user 5-fold CV, cluster-bootstrap 95\% CI)")
     ax.legend(frameon=False, loc="upper right")
 
@@ -232,10 +232,10 @@ def main():
     tex.append(r"\begin{table}[t]")
     tex.append(r"\centering")
     tex.append(r"\small")
-    tex.append(r"\caption{PILSD backbone$\times$corpus generality. "
+    tex.append(r"\caption{PEBS backbone$\times$corpus generality. "
                r"Within-user 5-fold CV, cluster-bootstrap 95\% CI "
                r"(2000 reps, clustering on \texttt{user\_id}).}")
-    tex.append(r"\label{tab:pilsd-3x2-matrix}")
+    tex.append(r"\label{tab:pebs-3x2-matrix}")
     tex.append(r"\begin{tabular}{llrr}")
     tex.append(r"\toprule")
     tex.append(r"Backbone & Corpus & $n_{\text{users}}$ & "
@@ -281,7 +281,7 @@ def main():
                r"\texttt{(user\_prompt, model\_response)} pairs; "
                r"PluriHarms anchor = backbone reward score on each "
                r"of 150 harm-eval prompts with a fixed generic assistant "
-               r"acknowledgement (App.~\ref{app:pilsd-matrix}).")
+               r"acknowledgement (App.~\ref{app:pebs-matrix}).")
     tex.append(r"\end{flushleft}")
     tex.append(r"\end{table}")
     TEX_INSERT.write_text("\n".join(tex) + "\n")

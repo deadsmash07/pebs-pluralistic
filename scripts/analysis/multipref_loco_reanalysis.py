@@ -1,6 +1,6 @@
 """MultiPref LOCO-Q (leave-one-comparison-out) re-analysis.
 
-Like PluriHarms (iter+N+224), MultiPref has single-rating-per-(evaluator,
+Like PluriHarms, MultiPref has single-rating-per-(evaluator,
 comparison) structure. If our hypothesis is right ("LOCO correction is
 dataset-specific, driven by conversational prompt recurrence"), MultiPref
 should ALSO show LOCO-Q ≈ random-fold gain, with no leakage factor.
@@ -16,8 +16,8 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-DATA = (Path(__file__).resolve().parents[2] / "3_PILSD_Standalone/data/multipref_evaluator_quality.parquet")
-OUT = (Path(__file__).resolve().parents[2] / "3_PILSD_Standalone/results/track1_multipref_loco_q")
+DATA = (Path(__file__).resolve().parents[2] / "3_PEBS_Standalone/data/multipref_evaluator_quality.parquet")
+OUT = (Path(__file__).resolve().parents[2] / "3_PEBS_Standalone/results/track1_multipref_loco_q")
 N_BOOT = 500
 RNG = 20260420
 
@@ -74,7 +74,7 @@ def main():
         if len(ev_df) < 20:
             continue
         comparisons = ev_df["comparison_id"].unique()
-        sq_pop, sq_pilsd = [], []
+        sq_pop, sq_pebs = [], []
         for cid in comparisons:
             train = ev_df[ev_df["comparison_id"] != cid]
             test = ev_df[ev_df["comparison_id"] == cid]
@@ -91,21 +91,21 @@ def main():
             x_te = test["overall_conf"].to_numpy(dtype=np.float64)
             y_te = test["quality"].to_numpy(dtype=np.float64)
             pred_pop = a_pop + b_pop * x_te
-            pred_pilsd = a_s + b_s * x_te
+            pred_pebs = a_s + b_s * x_te
             sq_pop.append(float(np.sum((y_te - pred_pop) ** 2)))
-            sq_pilsd.append(float(np.sum((y_te - pred_pilsd) ** 2)))
+            sq_pebs.append(float(np.sum((y_te - pred_pebs) ** 2)))
         if not sq_pop:
             continue
         rmse_pop = float(np.sqrt(sum(sq_pop) / len(ev_df)))
-        rmse_pilsd = float(np.sqrt(sum(sq_pilsd) / len(ev_df)))
+        rmse_pebs = float(np.sqrt(sum(sq_pebs) / len(ev_df)))
         if rmse_pop > 1e-6:
-            per_eval_gains.append(100.0 * (rmse_pop - rmse_pilsd) / rmse_pop)
+            per_eval_gains.append(100.0 * (rmse_pop - rmse_pebs) / rmse_pop)
 
     gains = np.array(per_eval_gains)
     mean = float(gains.mean())
     boots = np.array([rng.choice(gains, len(gains), replace=True).mean() for _ in range(N_BOOT)])
     lo, hi = np.percentile(boots, [2.5, 97.5])
-    print(f"\n[MultiPref LOCO-Q PILSD-shrunk vs pop-OLS] gain = {mean:+.3f}%  CI [{lo:+.3f}, {hi:+.3f}]")
+    print(f"\n[MultiPref LOCO-Q PEBS-shrunk vs pop-OLS] gain = {mean:+.3f}%  CI [{lo:+.3f}, {hi:+.3f}]")
     print(f"[n_evaluators] {len(gains)}")
 
     summary = {

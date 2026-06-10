@@ -1,12 +1,12 @@
-"""Track 1 downstream: PPO with vanilla / PILSD-calibrated / delayed PILSD reward.
+"""Track 1 downstream: PPO with vanilla / PEBS-calibrated / delayed PEBS reward.
 
 Three arms are supported via --arm:
   vanilla         reward = r_raw (7B+LoRA RM output, no affine)
-  pilsd           reward = alpha_ref + beta_ref * r_raw, no delay
-  pilsd_delay     reward = alpha_ref + beta_ref * r_raw, delayed K optimizer
+  pebs           reward = alpha_ref + beta_ref * r_raw, no delay
+  pebs_delay     reward = alpha_ref + beta_ref * r_raw, delayed K optimizer
                   steps via a FIFO buffer around the RM's score head.
 
-Delay semantics (T1+T2 integration experiment, 2026-04-18):
+Delay semantics (integration experiment):
   At each RM forward call (once per PPO optimizer step, since TRL batches
   the rollout scoring into a single RM pass), the computed score tensor
   is pushed onto a FIFO buffer of length K and the OLDEST tensor in the
@@ -19,7 +19,7 @@ Correction) premise: if delay degrades policy quality at fixed step count,
 the RAC fix is needed; if it doesn't, delay is a cheap trade-off.
 
 Hypothesis (H_ppo, H_delay):
-  H_ppo:   PILSD β-scaling changes advantage magnitude -> moves policy in KL.
+  H_ppo:   PEBS β-scaling changes advantage magnitude -> moves policy in KL.
   H_delay: Delay K=5 reduces effective reward-credit-assignment resolution,
            EXPECTED to (i) reduce reward accumulation at step t<K+buffer
            because zeros are fed in; (ii) produce a different final policy
@@ -27,8 +27,8 @@ Hypothesis (H_ppo, H_delay):
            if step count is not much larger than K (here K=5 vs 500 steps,
            so the effect may be small — honest reporting required).
 
-Arm A: reward = alpha_ref + beta_ref * r_raw, delay=0 (pilsd)
-Arm B: reward = alpha_ref + beta_ref * r_raw, delay=K (pilsd_delay)
+Arm A: reward = alpha_ref + beta_ref * r_raw, delay=0 (pebs)
+Arm B: reward = alpha_ref + beta_ref * r_raw, delay=K (pebs_delay)
 
 Policy: Qwen2.5-0.5B-Instruct (base + reset head from RM architecture).
 Ref: frozen copy of policy init.
@@ -191,7 +191,7 @@ class DelayedAffineScore(nn.Module):
         return emit
 
 
-def apply_pilsd_to_rm(rm_model, alpha: float, beta: float, delay: int = 0):
+def apply_pebs_to_rm(rm_model, alpha: float, beta: float, delay: int = 0):
     """Patch rm_model.score with (possibly delayed) affine calibration.
 
     Returns the wrapper module so caller can access call_log.
@@ -235,9 +235,9 @@ def build_prompt_dataset(prism_pairs_parquet, tokenizer, n_train, n_eval, seed,
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--arm", choices=["vanilla", "pilsd", "pilsd_delay"], required=True)
+    ap.add_argument("--arm", choices=["vanilla", "pebs", "pebs_delay"], required=True)
     ap.add_argument("--reward-delay-steps", type=int, default=0,
-                    help="Delay the reward K optimizer steps (used iff arm=pilsd_delay).")
+                    help="Delay the reward K optimizer steps (used iff arm=pebs_delay).")
     ap.add_argument("--policy-name", default="Qwen/Qwen2.5-0.5B-Instruct")
     ap.add_argument("--value-model-name", default=None,
                     help="Name of the base model for the value head. Defaults to --policy-name. "
@@ -273,14 +273,14 @@ def main():
     ap.add_argument("--response-length", type=int, default=64)
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--output-dir",
-                    default="<DATA_ROOT>/1_Causal_RLHF/results/track1_ppo_pilsd_vs_vanilla")
+                    default="<DATA_ROOT>/1_Causal_RLHF/results/track1_ppo_pebs_vs_vanilla")
     args = ap.parse_args()
 
     out_dir = Path(args.output_dir) / args.arm
     out_dir.mkdir(parents=True, exist_ok=True)
 
     cal = pd.read_parquet(args.calibrators_parquet)
-    if args.arm in ("pilsd", "pilsd_delay"):
+    if args.arm in ("pebs", "pebs_delay"):
         if args.ref_user_id is not None:
             ref_row = cal[cal["user_id"] == args.ref_user_id].iloc[0]
             ref_mode = "explicit"
@@ -303,8 +303,8 @@ def main():
         ref_mode = "n/a"
         print("[vanilla] no affine (alpha=0, beta=1)")
 
-    # Delay is only active for pilsd_delay arm.
-    effective_delay = args.reward_delay_steps if args.arm == "pilsd_delay" else 0
+    # Delay is only active for pebs_delay arm.
+    effective_delay = args.reward_delay_steps if args.arm == "pebs_delay" else 0
     print(f"[arm] {args.arm} effective_delay_steps={effective_delay}")
 
     print("[load] tokenizers")
@@ -364,19 +364,19 @@ def main():
               f"rm={rm_tok.vocab_size}.")
 
     score_wrapper = None  # populated iff we patch .score
-    if args.arm in ("pilsd", "pilsd_delay"):
+    if args.arm in ("pebs", "pebs_delay"):
         print(f"[{args.arm}] wrapping RM.score with affine "
               f"(alpha={alpha_ref}, beta={beta_ref}, delay={effective_delay})")
         try:
             inner = reward_model.base_model.model
             _ = inner.score  # probe
-            score_wrapper = apply_pilsd_to_rm(
+            score_wrapper = apply_pebs_to_rm(
                 inner, alpha_ref, beta_ref, delay=effective_delay
             )
             print(f"[{args.arm}] patched inner.score -> {type(inner.score).__name__}")
         except Exception as e:
             print(f"[{args.arm}] inner patch failed: {e}; trying reward_model.score")
-            score_wrapper = apply_pilsd_to_rm(
+            score_wrapper = apply_pebs_to_rm(
                 reward_model, alpha_ref, beta_ref, delay=effective_delay
             )
 

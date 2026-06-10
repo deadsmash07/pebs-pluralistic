@@ -12,7 +12,7 @@ Like OASST2, OASST1 exposes:
     {quality, toxicity, humor, creativity, violence, spam, ...}. We use the
     `quality` label as the scalar annotation-quality proxy.
 
-Schema verified 2026-04-18 via `load_dataset('OpenAssistant/oasst1')`:
+Schema verified via `load_dataset('OpenAssistant/oasst1')`:
   - 84,437 rows (messages)
   - 12,917 unique users
   - 83,024 rows carry an aggregated quality label

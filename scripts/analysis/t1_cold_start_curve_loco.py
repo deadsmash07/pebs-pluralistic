@@ -1,13 +1,13 @@
 """T1 cold-start break-even under LOCO-strict protocol.
 
-Paper claims PILSD drops the cold-start break-even from k=20 to k=5 labelled
+Paper claims PEBS drops the cold-start break-even from k=20 to k=5 labelled
 utterances per user (4× data efficiency). That claim was made under random-
-fold CV. Re-verify under the iter+N+212 LOCO protocol: for each user
+fold CV. Re-verify under the LOCO protocol: for each user
 with ≥k utterances, fit per-user OLS on first-k-utterances-excluding-held-out-
-conversation and compare PILSD-shrunk RMSE on held-out conversation vs pop-
+conversation and compare PEBS-shrunk RMSE on held-out conversation vs pop-
 slope baseline, varying k ∈ {2, 5, 10, 15, 20, 30}.
 
-Break-even is the smallest k at which PILSD-shrunk outperforms pop-slope.
+Break-even is the smallest k at which PEBS-shrunk outperforms pop-slope.
 
 Output: results/track1_cold_start_loco/summary.json
 """
@@ -21,7 +21,7 @@ import pandas as pd
 from tqdm import tqdm
 
 T1 = (Path(__file__).resolve().parents[2] / "1_Causal_RLHF")
-OUT = (Path(__file__).resolve().parents[2] / "3_PILSD_Standalone/results/track1_cold_start_loco")
+OUT = (Path(__file__).resolve().parents[2] / "3_PEBS_Standalone/results/track1_cold_start_loco")
 N_BOOT = 500
 RNG = 20260420
 
@@ -98,18 +98,18 @@ def main():
             y_test = test["score_user"].to_numpy(dtype=np.float64)
             pred_pop = alpha_pop + beta_pop * x_test
             if np.all(np.isfinite([a_u, b_u, sa_u, sb_u])):
-                # PILSD shrunk blend
+                # PEBS shrunk blend
                 w_a = tau2_a / (tau2_a + sa_u ** 2 + 1e-12)
                 w_b = tau2_b / (tau2_b + sb_u ** 2 + 1e-12)
                 a_s = w_a * a_u + (1 - w_a) * alpha_pop
                 b_s = w_b * b_u + (1 - w_b) * beta_pop
-                pred_pilsd = a_s + b_s * x_test
+                pred_pebs = a_s + b_s * x_test
             else:
-                pred_pilsd = pred_pop
+                pred_pebs = pred_pop
             rmse_pop = float(np.sqrt(np.mean((y_test - pred_pop) ** 2)))
-            rmse_pilsd = float(np.sqrt(np.mean((y_test - pred_pilsd) ** 2)))
+            rmse_pebs = float(np.sqrt(np.mean((y_test - pred_pebs) ** 2)))
             if rmse_pop > 1e-6:
-                per_user_gains.append(100.0 * (rmse_pop - rmse_pilsd) / rmse_pop)
+                per_user_gains.append(100.0 * (rmse_pop - rmse_pebs) / rmse_pop)
 
         if not per_user_gains:
             continue
@@ -140,7 +140,7 @@ def main():
         "tau2_alpha": tau2_a, "tau2_beta": tau2_b,
         "per_k": per_k,
         "break_even_k": break_even,
-        "paper_claim_random_fold": "k=5 break-even (PILSD) vs k=20 (per-user OLS)",
+        "paper_claim_random_fold": "k=5 break-even (PEBS) vs k=20 (per-user OLS)",
     }
     (OUT / "summary.json").write_text(json.dumps(summary, indent=2))
     print(f"\nWrote {OUT}/summary.json")

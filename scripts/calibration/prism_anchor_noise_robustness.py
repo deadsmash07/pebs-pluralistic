@@ -1,20 +1,20 @@
-"""PRISM anchor noise robustness (iter+N+132).
+"""PRISM anchor noise robustness.
 
-Question: how robust is PILSD's +8.58% RMSE reduction to noise in the
-anchor score (RM)? At what noise level does PILSD lose its edge over
+Question: how robust is PEBS's +8.58% RMSE reduction to noise in the
+anchor score (RM)? At what noise level does PEBS lose its edge over
 pop-slope? This is an ANCHOR-QUALITY ablation — tests how dependent
-PILSD is on having a well-trained RM as the shared reference.
+PEBS is on having a well-trained RM as the shared reference.
 
 Protocol: take trained Qwen2.5-7B RM scores. Add Gaussian noise with
 SD = c * sigma(rm_score) where c in {0.0, 0.5, 1.0, 2.0, 5.0}.
-Fit pop-slope vs PILSD on the noised anchor, evaluate held-out-user
+Fit pop-slope vs PEBS on the noised anchor, evaluate held-out-user
 RMSE.
 
 Hypotheses:
-- At c=0: canonical result (PILSD +8.58%).
-- At c=5: RM is essentially pure noise; PILSD should lose or tie.
-- Crossover c where PILSD gain disappears: informative for how
-  anchor-quality-dependent PILSD is.
+- At c=0: canonical result (PEBS +8.58%).
+- At c=5: RM is essentially pure noise; PEBS should lose or tie.
+- Crossover c where PEBS gain disappears: informative for how
+  anchor-quality-dependent PEBS is.
 """
 
 from __future__ import annotations
@@ -89,21 +89,21 @@ def fit_and_score(df_train, df_test):
             w_b * b_ols + (1 - w_b) * beta_pop,
         )
 
-    per_user_rmse = {"pop": [], "pilsd": []}
+    per_user_rmse = {"pop": [], "pebs": []}
     for uid, g in df_test.groupby("user_id"):
         x = g["rm_z"].values
         y = g["score_user"].values
         pop_pred = pop_a * x + pop_b
         if uid in user_calib:
             a, b = user_calib[uid]
-            pilsd_pred = a * x + b
+            pebs_pred = a * x + b
         else:
-            pilsd_pred = pop_pred
+            pebs_pred = pop_pred
         per_user_rmse["pop"].append(float(np.sqrt(np.mean((y - pop_pred) ** 2))))
-        per_user_rmse["pilsd"].append(float(np.sqrt(np.mean((y - pilsd_pred) ** 2))))
+        per_user_rmse["pebs"].append(float(np.sqrt(np.mean((y - pebs_pred) ** 2))))
     return {
         "rmse_pop_mean": float(np.mean(per_user_rmse["pop"])),
-        "rmse_pilsd_mean": float(np.mean(per_user_rmse["pilsd"])),
+        "rmse_pebs_mean": float(np.mean(per_user_rmse["pebs"])),
     }
 
 
@@ -136,24 +136,24 @@ def main():
             df_noise["rm_score_noised"] - df_noise["rm_score_noised"].mean()
         ) / df_noise["rm_score_noised"].std()
 
-        fold_rmse = {"pop": [], "pilsd": []}
+        fold_rmse = {"pop": [], "pebs": []}
         for k in range(5):
             tr = df_noise[df_noise["fold"] != k]
             te = df_noise[df_noise["fold"] == k]
             r = fit_and_score(tr, te)
             fold_rmse["pop"].append(r["rmse_pop_mean"])
-            fold_rmse["pilsd"].append(r["rmse_pilsd_mean"])
+            fold_rmse["pebs"].append(r["rmse_pebs_mean"])
 
         pop_m = float(np.mean(fold_rmse["pop"]))
-        pilsd_m = float(np.mean(fold_rmse["pilsd"]))
-        rel = 100 * (pop_m - pilsd_m) / pop_m
-        print(f"[noise c={c:.1f}]  pop={pop_m:.3f}  pilsd={pilsd_m:.3f}  "
-              f"Δ(pop-pilsd)={pop_m-pilsd_m:+.3f} ({rel:+.2f}% rel)")
+        pebs_m = float(np.mean(fold_rmse["pebs"]))
+        rel = 100 * (pop_m - pebs_m) / pop_m
+        print(f"[noise c={c:.1f}]  pop={pop_m:.3f}  pebs={pebs_m:.3f}  "
+              f"Δ(pop-pebs)={pop_m-pebs_m:+.3f} ({rel:+.2f}% rel)")
         results[f"c={c}"] = {
             "noise_c": c,
             "rmse_pop_mean": pop_m,
-            "rmse_pilsd_mean": pilsd_m,
-            "delta_pop_minus_pilsd": pop_m - pilsd_m,
+            "rmse_pebs_mean": pebs_m,
+            "delta_pop_minus_pebs": pop_m - pebs_m,
             "rel_improvement_pct": rel,
         }
 

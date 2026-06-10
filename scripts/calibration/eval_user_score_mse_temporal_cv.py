@@ -1,7 +1,7 @@
-"""Temporal-CV version of H2e — adversarial review attack #4.
+"""Temporal-CV version of H2e.
 
-Random k-fold CV treats (α_j, β_j) as time-invariant. Track 3's thesis is
-that latent annotator effects drift. If calibrators drift within a user's
+Random k-fold CV treats (α_j, β_j) as time-invariant, but latent annotator
+effects may drift over time. If calibrators drift within a user's
 collection window, the random-fold 8.58% headline overstates generalization
 to future rollouts.
 
@@ -23,13 +23,13 @@ as sub-second tiebreak, since `generated_datetime` is conversation-level.
 
 Caveat: PRISM's entire collection window is 30 days and 90% of users span
 <1.5 hours. So "temporal drift" here mostly means drift within a session
-(reviewer fatigue, anchoring effects, prompt-type-within-session). For real
-long-term drift T3 addresses on OASST2 (15-month span), this is the best
+(rater fatigue, anchoring effects, prompt-type-within-session). For real
+long-term drift over months, this is the best
 public-RLHF-dataset proxy we have.
 
 Expected outcomes:
-  - If PILSD survives temporal split → headline robust to drift
-  - If headline degrades → honest finding; PILSD serves IID holdout, not
+  - If PEBS survives temporal split → headline robust to drift
+  - If headline degrades → honest finding; PEBS serves IID holdout, not
     temporal extrapolation
 """
 from __future__ import annotations
@@ -139,17 +139,17 @@ def compute_arm_rmses(
     # pop_slope
     yh = pop_alpha + pop_beta * x_te
     out["pop_slope"] = float(np.sqrt(np.mean((yh - y_te) ** 2)))
-    # PILSD naive OLS
+    # PEBS naive OLS
     a, b, Va, Vb = ols_with_V(x_tr, y_tr)
     yh = a + b * x_te
-    out["pilsd_ols"] = float(np.sqrt(np.mean((yh - y_te) ** 2)))
-    # PILSD shrunk
+    out["pebs_ols"] = float(np.sqrt(np.mean((yh - y_te) ** 2)))
+    # PEBS shrunk
     omega_a = tau_a_sq / (tau_a_sq + Va) if np.isfinite(Va) else 0.0
     omega_b = tau_b_sq / (tau_b_sq + Vb) if np.isfinite(Vb) else 0.0
     a_s = omega_a * a + (1 - omega_a) * pop_alpha
     b_s = omega_b * b + (1 - omega_b) * pop_beta
     yh = a_s + b_s * x_te
-    out["pilsd_shrunk"] = float(np.sqrt(np.mean((yh - y_te) ** 2)))
+    out["pebs_shrunk"] = float(np.sqrt(np.mean((yh - y_te) ** 2)))
     # diagnostic: per-user alpha/beta under temporal train
     out["_alpha_train"] = a
     out["_beta_train"] = b
@@ -263,7 +263,7 @@ def main():
         if res is None:
             continue
         row = {"user_id": uid, "n": len(grp_sorted), "span_days": span}
-        for arm in ["no_calib", "pop_slope", "pilsd_ols", "pilsd_shrunk"]:
+        for arm in ["no_calib", "pop_slope", "pebs_ols", "pebs_shrunk"]:
             row[f"rmse_{arm}"] = res[arm]
         row["alpha_train"] = res["_alpha_train"]
         row["beta_train"] = res["_beta_train"]
@@ -279,7 +279,7 @@ def main():
 
     # 5. Headline RMSE
     print(f"\n=== 4-arm TEMPORAL CV ({len(pu)} users, 80/20) ===")
-    arms = ["no_calib", "pop_slope", "pilsd_ols", "pilsd_shrunk"]
+    arms = ["no_calib", "pop_slope", "pebs_ols", "pebs_shrunk"]
     for arm in arms:
         col = f"rmse_{arm}"
         print(
@@ -297,9 +297,9 @@ def main():
         }
 
     comparisons = {
-        "shrunk_vs_ols": paired(pu.rmse_pilsd_shrunk, pu.rmse_pilsd_ols),
-        "shrunk_vs_pop": paired(pu.rmse_pilsd_shrunk, pu.rmse_pop_slope),
-        "ols_vs_pop": paired(pu.rmse_pilsd_ols, pu.rmse_pop_slope),
+        "shrunk_vs_ols": paired(pu.rmse_pebs_shrunk, pu.rmse_pebs_ols),
+        "shrunk_vs_pop": paired(pu.rmse_pebs_shrunk, pu.rmse_pop_slope),
+        "ols_vs_pop": paired(pu.rmse_pebs_ols, pu.rmse_pop_slope),
     }
     print(f"\n=== Paired comparisons ===")
     for name, d in comparisons.items():
@@ -311,17 +311,17 @@ def main():
 
     rel_shrunk = (
         100
-        * (pu.rmse_pop_slope.mean() - pu.rmse_pilsd_shrunk.mean())
+        * (pu.rmse_pop_slope.mean() - pu.rmse_pebs_shrunk.mean())
         / pu.rmse_pop_slope.mean()
     )
     rel_ols = (
         100
-        * (pu.rmse_pop_slope.mean() - pu.rmse_pilsd_ols.mean())
+        * (pu.rmse_pop_slope.mean() - pu.rmse_pebs_ols.mean())
         / pu.rmse_pop_slope.mean()
     )
     print(f"\n=== Relative improvement vs pop-slope (TEMPORAL) ===")
-    print(f"  PILSD naive OLS: {rel_ols:+.2f}%")
-    print(f"  PILSD shrunk:    {rel_shrunk:+.2f}%")
+    print(f"  PEBS naive OLS: {rel_ols:+.2f}%")
+    print(f"  PEBS shrunk:    {rel_shrunk:+.2f}%")
 
     # 7. Bootstrap CI on relative improvement over users (user-clustered resample)
     boot_shrunk = []
@@ -332,12 +332,12 @@ def main():
         sample = pu.iloc[idx]
         rel_s = (
             100
-            * (sample.rmse_pop_slope.mean() - sample.rmse_pilsd_shrunk.mean())
+            * (sample.rmse_pop_slope.mean() - sample.rmse_pebs_shrunk.mean())
             / sample.rmse_pop_slope.mean()
         )
         rel_o = (
             100
-            * (sample.rmse_pop_slope.mean() - sample.rmse_pilsd_ols.mean())
+            * (sample.rmse_pop_slope.mean() - sample.rmse_pebs_ols.mean())
             / sample.rmse_pop_slope.mean()
         )
         boot_shrunk.append(rel_s)
@@ -404,27 +404,27 @@ def main():
         if len(merged) > 0:
             # Within-user Δ for shrunk arm: temporal - random
             delta = (
-                merged.rmse_pilsd_shrunk_temp - merged.rmse_pilsd_shrunk_rand
+                merged.rmse_pebs_shrunk_temp - merged.rmse_pebs_shrunk_rand
             )
             w_shrunk = stats.wilcoxon(
-                merged.rmse_pilsd_shrunk_temp,
-                merged.rmse_pilsd_shrunk_rand,
+                merged.rmse_pebs_shrunk_temp,
+                merged.rmse_pebs_shrunk_rand,
                 alternative="two-sided",
             )
             random_vs_temporal = {
                 "n_users": int(len(merged)),
-                "mean_rmse_random_shrunk": float(merged.rmse_pilsd_shrunk_rand.mean()),
-                "mean_rmse_temporal_shrunk": float(merged.rmse_pilsd_shrunk_temp.mean()),
+                "mean_rmse_random_shrunk": float(merged.rmse_pebs_shrunk_rand.mean()),
+                "mean_rmse_temporal_shrunk": float(merged.rmse_pebs_shrunk_temp.mean()),
                 "mean_delta_temp_minus_random": float(delta.mean()),
                 "frac_temporal_worse": float((delta > 0).mean()),
                 "wilcoxon_p": float(w_shrunk.pvalue),
             }
             print(f"\n=== Random-CV vs Temporal-CV (shrunk arm, N={len(merged)}) ===")
             print(
-                f"  mean RMSE random : {merged.rmse_pilsd_shrunk_rand.mean():.3f}"
+                f"  mean RMSE random : {merged.rmse_pebs_shrunk_rand.mean():.3f}"
             )
             print(
-                f"  mean RMSE temporal: {merged.rmse_pilsd_shrunk_temp.mean():.3f}"
+                f"  mean RMSE temporal: {merged.rmse_pebs_shrunk_temp.mean():.3f}"
             )
             print(f"  Δ (temp - rand)  : {delta.mean():+.3f}")
             print(

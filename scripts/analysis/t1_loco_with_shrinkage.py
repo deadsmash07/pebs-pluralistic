@@ -1,17 +1,17 @@
-"""LOCO CV extension: measure PILSD-SHRUNK (not just per-user OLS) gain.
+"""LOCO CV extension: measure PEBS-SHRUNK (not just per-user OLS) gain.
 
-Iter+N+212's closing of attack #1 reported LOCO per-user OLS vs pop-OLS
-(+4.22%). The paper's actual claim is about PILSD-shrunk — a convex blend
+The earlier LOCO analysis reported per-user OLS vs pop-OLS
+(+4.22%). The paper's actual claim is about PEBS-shrunk — a convex blend
 of per-user OLS with population via EB weight ω = τ²/(τ² + σ²/n_j).
 
 This script: for each held-out conversation within a user,
   1. Fit per-user OLS on training folds to get (α_j_LOCO, β_j_LOCO)
   2. Compute population mean (α_pop, β_pop) across OTHER users
   3. Estimate τ² from the LOCO-population per-user OLS distribution
-  4. Compute ω_j and PILSD-SHRUNK per-user calibrator
+  4. Compute ω_j and PEBS-SHRUNK per-user calibrator
   5. Evaluate on held-out conversation RMSE
 
-If PILSD-shrunk beats per-user OLS in LOCO, shrinkage is the mechanism
+If PEBS-shrunk beats per-user OLS in LOCO, shrinkage is the mechanism
 (not memorization). If they tie, per-user is enough for this slice.
 """
 from __future__ import annotations
@@ -24,7 +24,7 @@ import pandas as pd
 from tqdm import tqdm
 
 T1 = (Path(__file__).resolve().parents[2] / "1_Causal_RLHF")
-OUT = (Path(__file__).resolve().parents[2] / "3_PILSD_Standalone/results/track1_loco_cv_shrunk")
+OUT = (Path(__file__).resolve().parents[2] / "3_PEBS_Standalone/results/track1_loco_cv_shrunk")
 N_BOOT = 2000
 RNG = 20260420
 MIN_CONV_PER_USER = 2
@@ -89,7 +89,7 @@ def main():
 
         sq_naive = []
         sq_user_ols = []
-        sq_pilsd_shrunk = []
+        sq_pebs_shrunk = []
 
         for held_conv in conv_ids:
             train = u_df[u_df["conversation_id"] != held_conv]
@@ -104,19 +104,19 @@ def main():
             pred_naive = alpha_pop + beta_pop * x_test
             pred_user_ols = a_u + b_u * x_test if np.isfinite(a_u) else pred_naive
 
-            # PILSD-shrunk: ω blend of (a_u, b_u) with (α_pop, β_pop)
+            # PEBS-shrunk: ω blend of (a_u, b_u) with (α_pop, β_pop)
             if np.isfinite(a_u) and np.isfinite(se_a_u) and np.isfinite(b_u) and np.isfinite(se_b_u):
                 w_a = tau2_a / (tau2_a + se_a_u ** 2 + 1e-12)
                 w_b = tau2_b / (tau2_b + se_b_u ** 2 + 1e-12)
                 a_s = w_a * a_u + (1 - w_a) * alpha_pop
                 b_s = w_b * b_u + (1 - w_b) * beta_pop
-                pred_pilsd = a_s + b_s * x_test
+                pred_pebs = a_s + b_s * x_test
             else:
-                pred_pilsd = pred_naive
+                pred_pebs = pred_naive
 
             sq_naive.append(float(np.sum((y_test - pred_naive) ** 2)))
             sq_user_ols.append(float(np.sum((y_test - pred_user_ols) ** 2)))
-            sq_pilsd_shrunk.append(float(np.sum((y_test - pred_pilsd) ** 2)))
+            sq_pebs_shrunk.append(float(np.sum((y_test - pred_pebs) ** 2)))
 
         n_utt = len(u_df)
         if n_utt < MIN_UTT_PER_USER:
@@ -127,13 +127,13 @@ def main():
             "n_conv": int(len(conv_ids)),
             "rmse_naive_pop": float(np.sqrt(sum(sq_naive) / n_utt)),
             "rmse_user_ols_loco": float(np.sqrt(sum(sq_user_ols) / n_utt)),
-            "rmse_pilsd_shrunk_loco": float(np.sqrt(sum(sq_pilsd_shrunk) / n_utt)),
+            "rmse_pebs_shrunk_loco": float(np.sqrt(sum(sq_pebs_shrunk) / n_utt)),
         })
 
     per_user = pd.DataFrame(per_user_results)
     per_user["gain_ols_pct"] = 100.0 * (per_user["rmse_naive_pop"] - per_user["rmse_user_ols_loco"]) / per_user["rmse_naive_pop"]
-    per_user["gain_pilsd_pct"] = 100.0 * (per_user["rmse_naive_pop"] - per_user["rmse_pilsd_shrunk_loco"]) / per_user["rmse_naive_pop"]
-    per_user["delta_pilsd_vs_ols_pct"] = per_user["gain_pilsd_pct"] - per_user["gain_ols_pct"]
+    per_user["gain_pebs_pct"] = 100.0 * (per_user["rmse_naive_pop"] - per_user["rmse_pebs_shrunk_loco"]) / per_user["rmse_naive_pop"]
+    per_user["delta_pebs_vs_ols_pct"] = per_user["gain_pebs_pct"] - per_user["gain_ols_pct"]
 
     # Cluster-bootstrap
     def boot_mean_ci(v: np.ndarray) -> tuple[float, float, float]:
@@ -145,12 +145,12 @@ def main():
         return point, float(lo), float(hi)
 
     p_ols, lo_ols, hi_ols = boot_mean_ci(per_user["gain_ols_pct"].to_numpy())
-    p_pilsd, lo_pilsd, hi_pilsd = boot_mean_ci(per_user["gain_pilsd_pct"].to_numpy())
-    p_delta, lo_delta, hi_delta = boot_mean_ci(per_user["delta_pilsd_vs_ols_pct"].to_numpy())
+    p_pebs, lo_pebs, hi_pebs = boot_mean_ci(per_user["gain_pebs_pct"].to_numpy())
+    p_delta, lo_delta, hi_delta = boot_mean_ci(per_user["delta_pebs_vs_ols_pct"].to_numpy())
 
     print(f"\n[LOCO CV — per-user OLS vs pop]       gain = {p_ols:+.2f}%  CI [{lo_ols:+.2f}, {hi_ols:+.2f}]")
-    print(f"[LOCO CV — PILSD-shrunk vs pop]       gain = {p_pilsd:+.2f}%  CI [{lo_pilsd:+.2f}, {hi_pilsd:+.2f}]")
-    print(f"[paired Δ — PILSD-shrunk vs user OLS] gain = {p_delta:+.2f}%  CI [{lo_delta:+.2f}, {hi_delta:+.2f}]"
+    print(f"[LOCO CV — PEBS-shrunk vs pop]       gain = {p_pebs:+.2f}%  CI [{lo_pebs:+.2f}, {hi_pebs:+.2f}]")
+    print(f"[paired Δ — PEBS-shrunk vs user OLS] gain = {p_delta:+.2f}%  CI [{lo_delta:+.2f}, {hi_delta:+.2f}]"
           f"  {'(significant)' if lo_delta > 0 or hi_delta < 0 else '(null)'}")
 
     summary = {
@@ -160,7 +160,7 @@ def main():
         "alpha_pop": alpha_pop,
         "beta_pop": beta_pop,
         "loco_ols_gain_pct":          {"mean": p_ols,   "ci95": [lo_ols,   hi_ols]},
-        "loco_pilsd_shrunk_gain_pct": {"mean": p_pilsd, "ci95": [lo_pilsd, hi_pilsd]},
+        "loco_pebs_shrunk_gain_pct": {"mean": p_pebs, "ci95": [lo_pebs, hi_pebs]},
         "delta_shrunk_vs_ols_pct":    {"mean": p_delta, "ci95": [lo_delta, hi_delta]},
     }
     (OUT / "summary.json").write_text(json.dumps(summary, indent=2))

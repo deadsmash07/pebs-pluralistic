@@ -1,25 +1,22 @@
-"""Q6 - DPO downstream-impact: PILSD-corrected reward vs uncorrected reward.
+"""Q6 - DPO downstream-impact: PEBS-corrected reward vs uncorrected reward.
 
-Per `memory/p0_experiment_queue_v1_2026_05_03.md` Q6 brief:
-
-**Hypothesis**: DPO trained with PILSD-corrected reward beats DPO with
+**Hypothesis**: DPO trained with PEBS-corrected reward beats DPO with
 uncorrected reward on downstream tasks (AlpacaEval-2 win-rate proxy +
 held-out preference-accuracy).
 
-**Why P0e SPOTLIGHT-BLOCKER** (user 2026-05-02 16:20 IST original P0e
-directive): "RMSE not downstream / RMSE != alignment quality / RMSE
+**Why this matters**: "RMSE != alignment quality / RMSE
 improvements might be cosmetic calibration fixes". Q6 directly tests
-whether PILSD-corrected reward affects DOWNSTREAM POLICY behaviour, not
-just calibration RMSE. ESTABLISHED-positive lands the SPOTLIGHT argument
-that PILSD's RMSE gain translates into DOWNSTREAM POLICY IMPROVEMENT.
-FALSIFIED-NEUTRAL bounds the headline claim to RMSE-only and is
-publishable per Skill: honest-disclosure SCOPE-not-RETRACT.
+whether PEBS-corrected reward affects DOWNSTREAM POLICY behaviour, not
+just calibration RMSE. A positive result shows
+that PEBS's RMSE gain translates into DOWNSTREAM POLICY IMPROVEMENT.
+A neutral result bounds the headline claim to RMSE-only and is
+publishable as an honest scope limit.
 
 DESIGN - TWO ARMS, ONE BASE MODEL, IDENTICAL DPO HYPERPARAMS
 ============================================================
 
 Both arms train DPO LoRA adapters on the SAME base model
-(meta-llama/Meta-Llama-3-8B-Instruct, 4-bit nf4 quant + r=16 LoRA, ~10-12h on H100).
+(meta-llama/Meta-Llama-3-8B-Instruct, 4-bit nf4 quant + r=16 LoRA, ~10-12h on an 80GB GPU).
 The ONLY difference: how preference pairs are SELECTED + LABELLED from PRISM
 utterances using the user-attached reward signal.
 
@@ -31,23 +28,22 @@ responses, the chosen/rejected pair is the response with `if_chosen=True`
 standard PRISM preference protocol (matches `curate_prism_pairs.py`).
 Training data: ~24k pairs.
 
-ARM B - PILSD-CORRECTED-REWARD TREATMENT
+ARM B - PEBS-CORRECTED-REWARD TREATMENT
 ----------------------------------------
 Same source (PRISM utterances) but the chosen/rejected LABEL is
-re-determined by the PILSD-corrected per-user reward:
+re-determined by the PEBS-corrected per-user reward:
     r_calibrated_j(x) = alpha_j + beta_j * r_rm(x)
-where (alpha_j, beta_j) are the PILSD shrunk per-user calibrators from
-`prism_user_calibrators_shrunk.parquet` (T1 anchor;
-ESTABLISHED-COMPOUND-NEEDED canonical=8.55%). For each (user_id, conv,
+where (alpha_j, beta_j) are the PEBS shrunk per-user calibrators from
+`prism_user_calibrators_shrunk.parquet` (canonical gain 8.55%). For each (user_id, conv,
 turn), within all responses available, the response with HIGHEST
 r_calibrated_j is "chosen" and the response with LOWEST r_calibrated_j
 is "rejected". Training data: ~24k pairs (same group structure; possibly
 different chosen/rejected within each group).
 
 KEY INSIGHT: in (~25-35%) of groups, ARM B's chosen/rejected pair will
-DIFFER from ARM A's because PILSD's per-user shrinkage corrects for
+DIFFER from ARM A's because PEBS's per-user shrinkage corrects for
 user-specific score-scale mis-calibration (some users systematically
-under- or over-score; PILSD adjusts). The downstream test: does training
+under- or over-score; PEBS adjusts). The downstream test: does training
 on the CORRECTED pairs produce a better policy?
 
 EVAL PIPELINE - TWO METRICS (one cheap, one downstream)
@@ -55,9 +51,9 @@ EVAL PIPELINE - TWO METRICS (one cheap, one downstream)
 1. **Held-out PRISM pair-accuracy** (cheap; 5min): on a 20% PRISM hold-out
    user-disjoint test set, compute the implicit-reward-margin pair-accuracy
    (DPOTrainer's standard validation metric). Gap delta_accuracy_pp =
-   accuracy(ARM B) - accuracy(ARM A). A positive delta means PILSD-corrected
+   accuracy(ARM B) - accuracy(ARM A). A positive delta means PEBS-corrected
    training data produced a policy that better matches held-out PRISM users'
-   preferences. EXPECTED ~1-3pp on PILSD's mechanism (per RMSE-to-pair-acc
+   preferences. EXPECTED ~1-3pp on PEBS's mechanism (per RMSE-to-pair-acc
    first-order Taylor).
 
 2. **AlpacaEval-2 LC win-rate** (downstream; ~1-2h API + ~30min generation):
@@ -74,90 +70,87 @@ chatbot-arena Elo on top-tier models; lower on weaker policies; correlation
 DEGRADES on small-margin comparisons within ~3pp). Single-seed run; multi-
 seed deferred to camera-ready. PRISM-trained DPO policies are NOT general-
 chat models (they trained on 24k diverse prompts; AlpacaEval-2 is OOD for
-some); thus a small AlpacaEval-2 delta is consistent with PILSD's mechanism
+some); thus a small AlpacaEval-2 delta is consistent with PEBS's mechanism
 and DOES NOT falsify the held-out pair-accuracy result.
 
-4-class STRICT verdict-class (Skill: honest-disclosure 6.3)
-===========================================================
+Outcome classification
+======================
 
-ESTABLISHED-DPO-PILSD-DOMINATES-DOWNSTREAM
+CONFIRMED-DPO-PEBS-DOMINATES-DOWNSTREAM
     iff held-out pair-accuracy delta >= +1.5pp + bootstrap CI excludes 0
     AND AlpacaEval-2 LC win-rate delta >= +0.5pp (any positive direction)
-MODERATE-DPO-PILSD-PARTIAL-DOMINATES
+PARTIAL-DPO-PEBS-PARTIAL-DOMINATES
     iff held-out pair-accuracy delta >= +1pp + CI excludes 0
     OR AlpacaEval-2 delta in [+0.5, +1.5]pp
-PRELIMINARY-INCONCLUSIVE
+TENTATIVE-INCONCLUSIVE
     iff CI on either metric straddles 0 + delta in [-0.5, +0.5]pp
-FALSIFIED-DPO-NEUTRAL-OR-WORSE
+REJECTED-DPO-NEUTRAL-OR-WORSE
     iff held-out pair-accuracy delta <= 0 + CI excludes positive
     OR AlpacaEval-2 delta strictly negative + CI excludes positive
-    (would SCOPE-LIMIT the headline RMSE claim per Skill: honest-disclosure
-    6.3 - RMSE gain is real but does not transfer to downstream policy
+    (would SCOPE-LIMIT the headline RMSE claim
+    - RMSE gain is real but does not transfer to downstream policy
     improvement at this scale; PUBLISHABLE as honest finding)
 
-12-gate audit (Skill: research-grade-code-audit-pre-launch v1)
-==============================================================
+Design notes
+============
 
-G1 math-vs-code: PILSD per-user calibration uses
+- Math: PEBS per-user calibration uses
    `prism_user_calibrators_shrunk.parquet` columns alpha_j, beta_j VERBATIM
-   from W-B5 PRISM canonical (anchor 9c92523; ESTABLISHED-COMPOUND-NEEDED
-   canonical=8.55%). DPO loss is TRL DPOTrainer's standard implementation
+   from W-B5 PRISM canonical (canonical gain 8.55%).
+   DPO loss is TRL DPOTrainer's standard implementation
    (Rafailov et al. 2023 NeurIPS oral) - NO custom modifications.
-G2 hypothesis-vs-design: tests "does PILSD-corrected reward improve
-   downstream DPO-trained policy", which IS the Q6 brief. Both arms use
+- Hypothesis: tests "does PEBS-corrected reward improve
+   downstream DPO-trained policy". Both arms use
    IDENTICAL base model + LoRA config + DPO hyperparameters; ONLY
-   chosen/rejected label assignment differs (raw RM vs PILSD-corrected
-   RM). This isolates the PILSD-correction effect.
-G3 no silent-bypass: ARM B verified to produce DIFFERENT pairs from ARM A
-   in smoke-test (assert n_pairs_changed >= 0.05 * n_total per smoke gate).
-   If ARM B == ARM A on every group, the experiment IS A SILENT-BYPASS
-   (would FAIL G3); smoke-test fires the assertion.
-G4 eval pipeline integrity: held-out PRISM pair-accuracy uses standard
+   chosen/rejected label assignment differs (raw RM vs PEBS-corrected
+   RM). This isolates the PEBS-correction effect.
+- No silent-bypass: ARM B verified to produce DIFFERENT pairs from ARM A
+   in a quick-run test (assert n_pairs_changed >= 0.05 * n_total).
+   If ARM B == ARM A on every group, the experiment IS A SILENT-BYPASS;
+   the quick-run test fires the assertion.
+- Eval pipeline: held-out PRISM pair-accuracy uses standard
    DPOTrainer eval_dataset framework - implicit reward margin > 0 -> pred
    chosen -> if matches label_chosen, count as correct. AlpacaEval-2
    uses official alpaca_eval CLI with default LC-gpt-4 judge config.
-G5 reference-implementation: TRL DPOTrainer at trl 0.11.4 (matches
+- Reference implementation: TRL DPOTrainer at trl 0.11.4 (matches
    transformers 4.46.3; pinned compatible). Reference: Rafailov et al.
    (2023) "Direct Preference Optimization" NeurIPS oral
    (arXiv:2305.18290) Eq. 7. Inherits TRL's DPO loss directly.
-G6 hyperparameter sanity: lr=5e-7 / beta=0.1 / batch=2*8 grad-accum=8
+- Hyperparameters: lr=5e-7 / beta=0.1 / batch=2*8 grad-accum=8
    -> effective batch=128 / max_seq_len=2048 / 1 epoch / cosine lr
    schedule / warmup_ratio=0.1 - all within Rafailov 2023 sec 4
    recommendation range. LoRA r=16 / alpha=32 / target attn+mlp.
-G7 per-step diagnostic: TRL's DPOTrainer logs per-step train_loss /
+- Diagnostics: TRL's DPOTrainer logs per-step train_loss /
    rewards/chosen / rewards/rejected / rewards/margins / accuracy /
    logits/chosen / logits/rejected; persisted to logs/q6_dpo.log.
-G8 reproducibility: SEED=20260420 (matches W-B5/Q1/Q3 canonical) +
+- Reproducibility: SEED=20260420 (matches W-B5/Q1/Q3 canonical) +
    TRL transformers SEED + torch SEED set; git HEAD persisted +
    parquet sha256 + alpaca_eval prompt-set sha256 in summary.json.
-G9 output schema: 4-class STRICT verdict-class STRING + delta-accuracy +
-   delta-win-rate + CI bounds + per-arm metrics dict + audit-trail commit
-   anchors.
-G10 compute envelope: ~10-12h DPO training x 2 arms = ~20-24h on H100
+- Output schema: outcome string + delta-accuracy +
+   delta-win-rate + CI bounds + per-arm metrics dict.
+- Compute envelope: ~10-12h DPO training x 2 arms = ~20-24h on an 80GB GPU
     + ~2-3h AlpacaEval-2 generation+judge (805 prompts at ~3 min/prompt
-    incl. gpt-4 judge). Cost ~$60-80 (well under $1500 cap).
-G11 anti-overfitting: not theory-claiming (DPO is empirical); per-arm
+    incl. gpt-4 judge). Cost ~$60-80.
+- Anti-overfitting: per-arm
     KL to reference policy logged + early-stop disabled (Rafailov 2023
     found KL grows monotone but pair-accuracy peaks earlier; we DO NOT
     early-stop because that would introduce a confound; we report
     end-of-training metrics for both arms equally).
-G12 honest-disclosure: 4-class verdict ENUMERATES the FALSIFIED branch
-    (PILSD doesn't transfer to downstream -> RMSE-only-claim scope-limit);
-    AlpacaEval-2-vs-pair-accuracy disagreement explicitly handled in
-    verdict (single-metric ESTABLISHED requires BOTH to point positive
-    in the strong sense; partial agreement -> MODERATE).
-
-NO INTERNAL KILL SWITCHES per user 2026-05-02 12:08 IST.
+- Honest disclosure: the decision rule ENUMERATES the REJECTED branch
+    (PEBS doesn't transfer to downstream -> RMSE-only-claim scope-limit);
+    AlpacaEval-2-vs-pair-accuracy disagreement explicitly handled
+    (single-metric CONFIRMED requires BOTH to point positive
+    in the strong sense; partial agreement -> PARTIAL).
 
 Output
 ------
 results/track1_q6_dpo_downstream_impact/{
     summary.json,
     pairs_arm_a_uncorrected.parquet,
-    pairs_arm_b_pilsd_corrected.parquet,
+    pairs_arm_b_pebs_corrected.parquet,
     pairs_diff_diagnostics.json,
     arm_a_uncorrected_lora/,
-    arm_b_pilsd_corrected_lora/,
+    arm_b_pebs_corrected_lora/,
     arm_a_alpaca_eval/,
     arm_b_alpaca_eval/,
     held_out_pair_accuracy.json,
@@ -172,8 +165,8 @@ References
 - Kirk, H. et al. (2024). PRISM Alignment Dataset. NeurIPS Datasets and
   Benchmarks 2024.
 - Morris, C. (1983). Parametric Empirical Bayes inference. JASA 78(381).
-- W-B5 PRISM canonical PILSD headline (T1 anchor 9c92523/702bc63 verdict
-  ESTABLISHED-COMPOUND-NEEDED canonical=8.55%).
+- W-B5 PRISM canonical PEBS headline (canonical gain 8.55%;
+  `scripts/wave_b/wave_b_W_B5_half_pebs.py`).
 - TRL library: https://github.com/huggingface/trl (DPOTrainer at 0.11.4).
 - AlpacaEval: https://github.com/tatsu-lab/alpaca_eval (LC weighted Elo).
 """
@@ -318,10 +311,10 @@ def build_pairs_uncorrected(utt_df):
     return df
 
 
-def build_pairs_pilsd_corrected(utt_df, calibrators):
-    """ARM B - PILSD-corrected reward selects chosen/rejected.
+def build_pairs_pebs_corrected(utt_df, calibrators):
+    """ARM B - PEBS-corrected reward selects chosen/rejected.
 
-    For each (user_id, conv, turn) group, apply PILSD per-user calibration
+    For each (user_id, conv, turn) group, apply PEBS per-user calibration
     to each response's RM score: r_calibrated_j(x) = alpha_j + beta_j * r_rm(x).
     Within the group, max-r_calibrated -> chosen, min-r_calibrated -> rejected.
     """
@@ -386,7 +379,7 @@ def build_pairs_pilsd_corrected(utt_df, calibrators):
 
 
 def diagnose_pair_diff(arm_a, arm_b):
-    """G3 silent-bypass guard: how many groups differ between ARM A and ARM B?"""
+    """Silent-bypass guard: how many groups differ between ARM A and ARM B?"""
     keys = ["user_id", "conversation_id", "turn"]
     a = arm_a.set_index(keys)[["chosen_within_turn_id", "rejected_within_turn_id"]]
     b = arm_b.set_index(keys)[["chosen_within_turn_id", "rejected_within_turn_id"]]
@@ -721,7 +714,7 @@ def alpaca_eval_judge(arm_a_outputs, arm_b_outputs, out_dir):
     results = {"arms": {}}
 
     for arm_name, out_path in [("arm_a_uncorrected", arm_a_outputs),
-                                ("arm_b_pilsd_corrected", arm_b_outputs)]:
+                                ("arm_b_pebs_corrected", arm_b_outputs)]:
         leaderboard_path = out_dir / f"{arm_name}_leaderboard.csv"
         cmd = [
             "alpaca_eval",
@@ -780,7 +773,7 @@ def alpaca_eval_judge(arm_a_outputs, arm_b_outputs, out_dir):
             }
 
     a = results["arms"].get("arm_a_uncorrected", {})
-    b = results["arms"].get("arm_b_pilsd_corrected", {})
+    b = results["arms"].get("arm_b_pebs_corrected", {})
     lcwr_a = a.get("lc_win_rate", float("nan"))
     lcwr_b = b.get("lc_win_rate", float("nan"))
     if np.isfinite(lcwr_a) and np.isfinite(lcwr_b):
@@ -793,7 +786,7 @@ def alpaca_eval_judge(arm_a_outputs, arm_b_outputs, out_dir):
 
 
 def assign_verdict(pair_acc, ae2):
-    """4-class STRICT per Q6 brief + Skill: honest-disclosure 6.3."""
+    """Pre-specified outcome classification."""
     pa_delta = pair_acc.get("delta_pp", float("nan"))
     pa_ci_lo = pair_acc.get("ci95_lo", float("nan"))
     pa_ci_hi = pair_acc.get("ci95_hi", float("nan"))
@@ -810,31 +803,31 @@ def assign_verdict(pair_acc, ae2):
 
     if pa_excludes_zero_neg or (pa_delta <= 0 and not pa_excludes_zero_pos):
         return {
-            "verdict_class": "FALSIFIED-DPO-NEUTRAL-OR-WORSE",
+            "verdict_class": "REJECTED-DPO-NEUTRAL-OR-WORSE",
             "pair_acc_delta_pp": pa_delta,
             "pair_acc_ci": (pa_ci_lo, pa_ci_hi),
             "ae2_delta_pp": ae2_delta,
             "decision_rule": (
                 "pair-accuracy delta <= 0 OR CI strictly negative -> "
-                "PILSD-corrected reward DID NOT improve downstream policy "
+                "PEBS-corrected reward DID NOT improve downstream policy "
                 "vs uncorrected reward at this scale (single-seed). "
-                "SCOPE-LIMIT honest finding per Skill: honest-disclosure 6.3."
+                "Honest scope-limiting finding."
             ),
         }
     if ae2_available and ae2_delta < -0.5 and pa_delta < 0.5:
         return {
-            "verdict_class": "FALSIFIED-DPO-AE2-NEGATIVE",
+            "verdict_class": "REJECTED-DPO-AE2-NEGATIVE",
             "pair_acc_delta_pp": pa_delta,
             "ae2_delta_pp": ae2_delta,
             "decision_rule": (
                 "AlpacaEval-2 LC win-rate strictly negative AND pair-acc "
-                "delta < 0.5pp -> downstream signal does not support PILSD."
+                "delta < 0.5pp -> downstream signal does not support PEBS."
             ),
         }
     if (pa_delta >= ESTABLISHED_PAIR_ACC_DELTA_PP and pa_excludes_zero_pos
             and ae2_available and ae2_delta >= ESTABLISHED_AE2_DELTA_PP):
         return {
-            "verdict_class": "ESTABLISHED-DPO-PILSD-DOMINATES-DOWNSTREAM",
+            "verdict_class": "CONFIRMED-DPO-PEBS-DOMINATES-DOWNSTREAM",
             "pair_acc_delta_pp": pa_delta,
             "pair_acc_ci": (pa_ci_lo, pa_ci_hi),
             "ae2_delta_pp": ae2_delta,
@@ -842,14 +835,14 @@ def assign_verdict(pair_acc, ae2):
                 f"pair-acc delta {pa_delta:+.2f}pp >= "
                 f"{ESTABLISHED_PAIR_ACC_DELTA_PP}pp + CI excludes 0 + "
                 f"AE2 delta {ae2_delta:+.2f}pp >= "
-                f"{ESTABLISHED_AE2_DELTA_PP}pp -> PILSD-corrected reward "
+                f"{ESTABLISHED_AE2_DELTA_PP}pp -> PEBS-corrected reward "
                 "produces measurably better downstream policy on BOTH "
                 "metrics."
             ),
         }
     if pa_delta >= MODERATE_PAIR_ACC_DELTA_PP and pa_excludes_zero_pos:
         return {
-            "verdict_class": "MODERATE-DPO-PILSD-PARTIAL-DOMINATES",
+            "verdict_class": "PARTIAL-DPO-PEBS-PARTIAL-DOMINATES",
             "pair_acc_delta_pp": pa_delta,
             "pair_acc_ci": (pa_ci_lo, pa_ci_hi),
             "ae2_delta_pp": ae2_delta,
@@ -863,18 +856,18 @@ def assign_verdict(pair_acc, ae2):
     if (ae2_available and MODERATE_AE2_DELTA_PP_LO <= ae2_delta
             < MODERATE_AE2_DELTA_PP_HI):
         return {
-            "verdict_class": "MODERATE-DPO-PILSD-PARTIAL-DOMINATES-AE2",
+            "verdict_class": "PARTIAL-DPO-PEBS-PARTIAL-DOMINATES-AE2",
             "pair_acc_delta_pp": pa_delta,
             "ae2_delta_pp": ae2_delta,
             "decision_rule": (
                 f"AE2 delta {ae2_delta:+.2f}pp in moderate range "
                 f"[{MODERATE_AE2_DELTA_PP_LO}, "
                 f"{MODERATE_AE2_DELTA_PP_HI}]; pair-acc delta "
-                f"{pa_delta:+.2f}pp insufficient for ESTABLISHED."
+                f"{pa_delta:+.2f}pp insufficient for CONFIRMED."
             ),
         }
     return {
-        "verdict_class": "PRELIMINARY-INCONCLUSIVE",
+        "verdict_class": "TENTATIVE-INCONCLUSIVE",
         "pair_acc_delta_pp": pa_delta,
         "pair_acc_ci": (pa_ci_lo, pa_ci_hi),
         "ae2_delta_pp": ae2_delta,
@@ -931,19 +924,8 @@ def main():
         "verdict_class": "PENDING",
         "args": {k: (str(v) if isinstance(v, Path) else v)
                  for k, v in vars(args).items()},
-        "skill_citations": [
-            "Skill: research-grade-code-audit-pre-launch v1 G1-G12",
-            "Skill: honest-disclosure 4-class STRICT 6.3",
-            "Skill: post-experiment-discipline-3-track Step 4-7",
-            "Skill: launch-runpod-h100-job (h100_v2_backup)",
-            "Skill: gpu-artifact-sync",
-            "Skill: icml-neurips-critical-reviewer-2026 Pass 5 (downstream)",
-            "Skill: research-paper-adversarial-review-icml-neurips P0e SPOTLIGHT-blocker",
-        ],
         "anchors": {
-            "w_b5_prism_canonical": "ESTABLISHED-COMPOUND-NEEDED canonical=8.55%",
-            "p0e_user_directive": "user 2026-05-02 16:20 IST 'RMSE not downstream'",
-            "q6_brief": "memory/p0_experiment_queue_v1_2026_05_03.md Q6",
+            "w_b5_prism_canonical": "canonical=8.55%",
             "rafailov_2023_dpo": "arXiv:2305.18290 NeurIPS oral 2023",
             "dubois_2024_alpaca_eval": "arXiv:2404.04475 ACL 2024 LC win-rate",
         },
@@ -953,11 +935,11 @@ def main():
             "on top models; degrades on small-margin (<3pp) comparisons "
             "(Dubois 2024).",
             "PRISM-trained DPO is not a general-chat model; AlpacaEval-2 is "
-            "partly OOD; small AE2 delta is consistent with PILSD's "
+            "partly OOD; small AE2 delta is consistent with PEBS's "
             "mechanism and DOES NOT falsify the held-out pair-accuracy.",
             "ARM B re-labels chosen/rejected within each user's group using "
-            "PILSD-corrected reward; ARM A uses user's actual selection. "
-            "ARM B is a CAUSAL test of PILSD-corrected reward signal "
+            "PEBS-corrected reward; ARM A uses user's actual selection. "
+            "ARM B is a CAUSAL test of PEBS-corrected reward signal "
             "quality, not a comparison of training data SIZE (both arms "
             "use the same n_pairs).",
             "Held-out pair-accuracy is computed on user-disjoint hold-out "
@@ -989,7 +971,7 @@ def main():
     )
     log(f"[Q6] utterances loaded: {len(utt_df)} rows, "
         f"{utt_df.user_id.nunique()} users")
-    log(f"[Q6] calibrators: {len(cal_df)} users with PILSD shrunk "
+    log(f"[Q6] calibrators: {len(cal_df)} users with PEBS shrunk "
         f"(alpha_j, beta_j)")
     log(f"[Q6] RM score range: [{utt_df.rm_score.min():.3f}, "
         f"{utt_df.rm_score.max():.3f}], mean={utt_df.rm_score.mean():.3f}")
@@ -1014,18 +996,18 @@ def main():
 
     log(f"[Q6] === Building ARM A (uncorrected reward) pairs ===")
     arm_a_pairs = build_pairs_uncorrected(utt_df)
-    log(f"[Q6] === Building ARM B (PILSD-corrected reward) pairs ===")
-    arm_b_pairs = build_pairs_pilsd_corrected(utt_df, cal_df)
+    log(f"[Q6] === Building ARM B (PEBS-corrected reward) pairs ===")
+    arm_b_pairs = build_pairs_pebs_corrected(utt_df, cal_df)
 
     arm_a_path = out_dir / "pairs_arm_a_uncorrected.parquet"
-    arm_b_path = out_dir / "pairs_arm_b_pilsd_corrected.parquet"
+    arm_b_path = out_dir / "pairs_arm_b_pebs_corrected.parquet"
     arm_a_pairs.to_parquet(arm_a_path, index=False)
     arm_b_pairs.to_parquet(arm_b_path, index=False)
 
     diff_diag = diagnose_pair_diff(arm_a_pairs, arm_b_pairs)
     diff_diag_path = out_dir / "pairs_diff_diagnostics.json"
     diff_diag_path.write_text(json.dumps(diff_diag, indent=2, default=str))
-    log(f"[Q6] G3 silent-bypass: frac_different="
+    log(f"[Q6] silent-bypass guard: frac_different="
         f"{diff_diag.get('frac_different', 0):.3f} "
         f"(min required {ARM_B_MIN_FRAC_PAIRS_CHANGED:.3f}); "
         f"PASS={diff_diag.get('g3_silent_bypass_pass', False)}")
@@ -1039,11 +1021,11 @@ def main():
     }
 
     if not diff_diag.get("g3_silent_bypass_pass", False):
-        log(f"[Q6] G3 SILENT-BYPASS GATE FAIL - ARM B differs from ARM A "
+        log(f"[Q6] SILENT-BYPASS GUARD FAIL - ARM B differs from ARM A "
             f"in only {diff_diag.get('frac_different', 0):.3f} fraction. "
             f"Below floor of {ARM_B_MIN_FRAC_PAIRS_CHANGED}. Aborting "
             f"before DPO to prevent tautological NULL.")
-        summary["verdict_class"] = "PRELIMINARY-INCONCLUSIVE-G3-SILENT-BYPASS-GATE-FAIL"
+        summary["verdict_class"] = "TENTATIVE-INCONCLUSIVE-SILENT-BYPASS-GUARD-FAIL"
         summary["completion_timestamp_utc"] = time.strftime(
             "%Y-%m-%dT%H:%M:%SZ", time.gmtime()
         )
@@ -1126,10 +1108,10 @@ def main():
             }
 
     if not args.skip_arm_b:
-        log(f"[Q6] === Stage 5b: ARM B (PILSD-corrected reward) DPO training ===")
+        log(f"[Q6] === Stage 5b: ARM B (PEBS-corrected reward) DPO training ===")
         try:
             arm_b_metrics = train_dpo_arm(
-                arm_name="arm_b_pilsd_corrected",
+                arm_name="arm_b_pebs_corrected",
                 train_pairs=arm_b_train,
                 evaluation_pairs=arm_b_test,
                 base_model_id=args.base_model_id,
@@ -1145,7 +1127,7 @@ def main():
                 dpo_num_epochs=args.dpo_num_epochs,
                 dpo_warmup_ratio=DPO_WARMUP_RATIO,
                 dpo_lr_scheduler=DPO_LR_SCHEDULER,
-                output_dir=out_dir / "arm_b_pilsd_corrected_lora",
+                output_dir=out_dir / "arm_b_pebs_corrected_lora",
                 seed=args.seed,
                 smoke=args.smoke,
             )
@@ -1155,10 +1137,10 @@ def main():
             arm_b_metrics = {"error": str(exc), "traceback": traceback.format_exc()}
     else:
         log(f"[Q6] === Skipping ARM B training (--skip-arm-b) ===")
-        cand = out_dir / "arm_b_pilsd_corrected_lora" / "final_adapter"
+        cand = out_dir / "arm_b_pebs_corrected_lora" / "final_adapter"
         if cand.exists():
             arm_b_metrics = {
-                "arm_name": "arm_b_pilsd_corrected",
+                "arm_name": "arm_b_pebs_corrected",
                 "final_adapter_path": str(cand),
                 "n_train_pairs": int(len(arm_b_train)),
                 "n_eval_pairs": int(len(arm_b_test)),
@@ -1207,7 +1189,7 @@ def main():
             log(f"[Q6] === Stage 7b: AlpacaEval-2 generation (ARM B) ===")
             arm_b_ae2_dir = out_dir / "arm_b_alpaca_eval"
             arm_b_outputs = generate_alpaca_eval_responses(
-                arm_name="arm_b_pilsd_corrected",
+                arm_name="arm_b_pebs_corrected",
                 base_model_id=args.base_model_id,
                 adapter_path=Path(arm_b_metrics["final_adapter_path"]),
                 out_dir=arm_b_ae2_dir,
@@ -1243,7 +1225,7 @@ def main():
 
     print()
     print("=" * 72)
-    print("Q6 DPO downstream-impact (PILSD-corrected reward vs uncorrected)")
+    print("Q6 DPO downstream-impact (PEBS-corrected reward vs uncorrected)")
     print("=" * 72)
     print(f"verdict_class       : {summary['verdict_class']}")
     print(f"pair-acc ARM A      : "
@@ -1256,7 +1238,7 @@ def main():
           f"{pair_acc.get('ci95_hi', float('nan')):+.2f}]")
     print(f"AE2 LC delta        : "
           f"{ae2.get('delta_lc_win_rate_pp', float('nan')):+.2f}pp")
-    print(f"G3 silent-bypass    : frac_different="
+    print(f"silent-bypass guard : frac_different="
           f"{diff_diag.get('frac_different', 0):.3f} "
           f"PASS={diff_diag.get('g3_silent_bypass_pass', False)}")
     print(f"summary_path        : {summary_path}")

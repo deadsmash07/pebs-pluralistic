@@ -1,4 +1,4 @@
-"""iter+N+265 — Morris g-function closed-form empirical validation.
+"""Morris g-function closed-form empirical validation.
 
 Theorem (CORRECTED from plan's draft).
 -----------------------------------
@@ -36,7 +36,7 @@ Empirical validation protocol
 -----------------------------
 For each corpus D ∈ {PRISM, PluriHarms, MultiPref}:
   1. Fit (tau_hat^2, sigma_eps_hat^2) via Stein-Morris/MoM (cross-validated with
-     the existing iter+N+260 4-estimator summary for PRISM; fit freshly for
+     the existing 4-estimator summary for PRISM; fit freshly for
      PluriHarms/MultiPref).
   2. Compute per-user r_j = n_j * tau_hat^2 / sigma_eps_hat^2.
   3. Predicted per-user squared-error gain  delta_hat_j = tau_hat^2 * g_pool(r_j).
@@ -44,7 +44,7 @@ For each corpus D ∈ {PRISM, PluriHarms, MultiPref}:
          pred_rel_imp = 1 - sqrt( (tau^2/(1+r_bar) + sigma_eps^2) /
                                   (tau^2 + sigma_eps^2) )
      where r_bar = n_bar_j * tau^2 / sigma_eps^2 (population-weighted).
-  5. Compare to observed PILSD gain %.
+  5. Compare to observed PEBS gain %.
 
 Results saved to  results/track1_morris_g_validate/summary.json.
 
@@ -157,7 +157,7 @@ def fit_tau_sigma(df: pd.DataFrame, y_col: str, user_col: str = "user_id",
             user_ses.append(se_alpha_j)
             s_within_sum += (resid ** 2).sum()
             df_within += n - 2
-            # POP-baseline residual (what PILSD actually needs to beat)
+            # POP-baseline residual (what PEBS actually needs to beat)
             pop_resid = y - (alpha_pop + beta_pop * x)
             s_popbaseline_sum += (pop_resid ** 2).sum()
             df_popbaseline += n
@@ -166,7 +166,7 @@ def fit_tau_sigma(df: pd.DataFrame, y_col: str, user_col: str = "user_id",
     user_alphas = np.asarray(user_alphas)
     n_users = len(user_ns)
     sigma_eps_sq = s_within_sum / df_within if df_within else np.nan
-    # POP-baseline variance (what PILSD improves over): MSE(pop_predictor)
+    # POP-baseline variance (what PEBS improves over): MSE(pop_predictor)
     mse_pop_baseline = (s_popbaseline_sum / df_popbaseline
                         if df_popbaseline else float(sigma_eps_sq))
 
@@ -219,7 +219,7 @@ def predict_rel_rmse_improvement(fit: dict) -> dict:
     r_j = ns / n_star if n_star > 0 else np.full_like(ns, np.inf)
     # predicted per-utterance MSE for each user, using EB:
     # EB intercept-shrinkage: alpha_hat_j = omega alpha_OLS_j + (1-omega) alpha_pop.
-    # When beta_j is also shrunk (PILSD uses per-user beta), predicted Y-variance
+    # When beta_j is also shrunk (PEBS uses per-user beta), predicted Y-variance
     # contribution from (beta_j - beta_pop) is captured empirically in
     # MSE_POP_baseline (the observed POP-slope MSE on the training data).
     # Following James-Stein risk decomposition on the INTERCEPT component:
@@ -250,10 +250,10 @@ def predict_rel_rmse_improvement(fit: dict) -> dict:
     abs_gain_j = tau_sq * g_pool(r_j)
     abs_gain_nj_weighted = float((weights * abs_gain_j).sum())
 
-    # ALSO: predicted EB-vs-OLS-per-user gain (target for MultiPref iter+N+201 metric).
+    # ALSO: predicted EB-vs-OLS-per-user gain (target for the MultiPref metric).
     # OLS-per-user MSE predicting new y = sigma^2/n_j + sigma^2  (intercept-only sampling var + irreducible noise)
     # EB MSE predicting new y = tau^2/(1+r_j) + sigma^2
-    # So PILSD-EB vs OLS-per-user: rel_imp_ols = 1 - sqrt(  (tau^2/(1+r_j) + sigma^2) /
+    # So PEBS-EB vs OLS-per-user: rel_imp_ols = 1 - sqrt(  (tau^2/(1+r_j) + sigma^2) /
     #                                                       (sigma^2/n_j + sigma^2) )
     mse_ols_per_user_j = sigma_sq / ns + sigma_sq
     rmse_ratio_ols_j = np.sqrt(mse_eb_j / mse_ols_per_user_j)
@@ -279,20 +279,20 @@ def predict_rel_rmse_improvement(fit: dict) -> dict:
 # --------------------------------------------------------------------------- #
 def load_prism(path: str):
     df = pd.read_parquet(path)
-    # PILSD fits: score_user (0-100) ~ alpha_j + beta_j * rm_score.
+    # PEBS fits: score_user (0-100) ~ alpha_j + beta_j * rm_score.
     return df[["user_id", "score_user", "rm_score"]].dropna(), "score_user", "rm_score"
 
 
 def load_pluriharms(path: str):
     df = pd.read_parquet(path)
-    # PILSD fits: rating (0-100) ~ alpha_j + beta_j * Harm_Level.
+    # PEBS fits: rating (0-100) ~ alpha_j + beta_j * Harm_Level.
     return df[["user_id", "rating", "Harm_Level"]].dropna(), "rating", "Harm_Level"
 
 
 def load_multipref(path: str):
     df = pd.read_parquet(path)
-    # PILSD on MultiPref: quality ~ alpha_j + beta_j * overall_conf (from
-    # 3_PILSD_Standalone/scripts/multipref_loco_reanalysis.py).
+    # PEBS on MultiPref: quality ~ alpha_j + beta_j * overall_conf (from
+    # 3_PEBS_Standalone/scripts/multipref_loco_reanalysis.py).
     df = df[["user_id", "quality", "overall_conf"]].dropna()
     return df, "quality", "overall_conf"
 
@@ -307,7 +307,7 @@ def parse_args():
     p.add_argument("--pluriharms-parquet",
                    default="data/pluriharms_long.parquet")
     p.add_argument("--multipref-parquet",
-                   default="../3_PILSD_Standalone/data/"
+                   default="../3_PEBS_Standalone/data/"
                            "multipref_evaluator_quality.parquet")
     p.add_argument("--output-dir",
                    default="results/track1_morris_g_validate")
@@ -335,7 +335,7 @@ def main():
             "y_col": y_p, "x_col": x_p,
             "fit": fit_p,
             "predicted": pred_p,
-            "observed_pilsd_gain_pct": 8.58,  # iter+N+260 MoM headline
+            "observed_pebs_gain_pct": 8.58,  # PRISM MoM headline
         }
     except Exception as e:  # pragma: no cover
         corpora["PRISM"] = {"error": str(e)}
@@ -350,7 +350,7 @@ def main():
             "y_col": y_h, "x_col": x_h,
             "fit": fit_h,
             "predicted": pred_h,
-            "observed_pilsd_gain_pct": 8.64,  # iter+N+149
+            "observed_pebs_gain_pct": 8.64,
         }
     except Exception as e:
         corpora["PluriHarms"] = {"error": str(e)}
@@ -365,7 +365,7 @@ def main():
             "y_col": y_m, "x_col": x_m,
             "fit": fit_m,
             "predicted": pred_m,
-            "observed_pilsd_gain_pct": 0.47,  # iter+N+201
+            "observed_pebs_gain_pct": 0.47,
         }
     except Exception as e:
         corpora["MultiPref"] = {"error": str(e)}
@@ -377,10 +377,10 @@ def main():
             table.append({"corpus": name, "error": rec["error"]})
             continue
         # Choose the right predicted metric for each corpus based on the
-        # published metric.  PRISM/PluriHarms report PILSD-shrunk vs POP-slope
-        # baseline. MultiPref iter+N+201 also reports vs POP-slope, but
+        # published metric.  PRISM/PluriHarms report PEBS-shrunk vs POP-slope
+        # baseline. The MultiPref run also reports vs POP-slope, but
         # its observed 0.47% is tiny because n_j=188 is far right of n_star=0.2,
-        # so EB ≈ OLS-per-user (omega≈0.998). The PILSD-vs-POP gap for MultiPref
+        # so EB ≈ OLS-per-user (omega≈0.998). The PEBS-vs-POP gap for MultiPref
         # is actually large (the prediction of ~60% is what the RE model says
         # cross-user heterogeneity COULD buy — but MultiPref's observed metric
         # is post-fold-collapse after POP already near-optimal on overall_conf).
@@ -406,9 +406,9 @@ def main():
             "g_js_at_r_bar": round(rec["predicted"]["g_js_at_r_bar"], 4),
             "predicted_rel_imp_vs_POP_pct": round(pred_pop, 2),
             "predicted_rel_imp_vs_OLS_per_user_pct": round(pred_ols, 4),
-            "observed_rel_imp_pct": rec["observed_pilsd_gain_pct"],
-            "delta_pp_signed": round(pred_pop - rec["observed_pilsd_gain_pct"], 2),
-            "delta_pp_abs": round(abs(pred_pop - rec["observed_pilsd_gain_pct"]), 2),
+            "observed_rel_imp_pct": rec["observed_pebs_gain_pct"],
+            "delta_pp_signed": round(pred_pop - rec["observed_pebs_gain_pct"], 2),
+            "delta_pp_abs": round(abs(pred_pop - rec["observed_pebs_gain_pct"]), 2),
         })
 
     within_1pp = sum(1 for r in table if "delta_pp_abs" in r and r["delta_pp_abs"] <= 1.0)
@@ -416,7 +416,6 @@ def main():
     within_5pp = sum(1 for r in table if "delta_pp_abs" in r and r["delta_pp_abs"] <= 5.0)
 
     out = {
-        "iter": "iter+N+265",
         "theorem": "Morris g-function closed form; see morris_g_validate.py docstring",
         "g_pool_form": "g_pool(r) = r/(1+r)  [risk-gap vs POP baseline]",
         "g_js_form": "g_js(r) = r/(1+r)^2   [James-Stein omega*(1-omega), interpretive]",
@@ -442,7 +441,7 @@ def main():
 
     print(f"[morris_g_validate] wrote {outdir/'summary.json'}")
     print(f"[morris_g_validate] wall = {out['wall_seconds']:.1f}s")
-    print("\nPredicted vs observed PILSD gain (%):")
+    print("\nPredicted vs observed PEBS gain (%):")
     for r in table:
         if "error" in r:
             print(f"  {r['corpus']}: ERROR {r['error']}")

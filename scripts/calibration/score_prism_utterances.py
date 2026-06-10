@@ -1,6 +1,6 @@
 """Score every PRISM utterance with a trained reward model → per-user calibration data.
 
-**Pipeline insight (2026-04-17)**: PRISM users do NOT share reference responses —
+**Pipeline insight**: PRISM users do NOT share reference responses —
 each (interaction_id, turn) comparison is unique to one user, so traditional
 anchor-vignette identification (designated anchors rated by all users) is not
 directly available. We use an ALTERNATE identification strategy:

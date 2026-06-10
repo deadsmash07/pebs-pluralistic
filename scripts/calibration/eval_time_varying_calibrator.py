@@ -1,6 +1,6 @@
-"""Time-varying PILSD calibrator v2 — falsifiable retest of NEG-T1.KALMAN.
+"""Time-varying PEBS calibrator v2 — falsifiable retest of NEG-T1.KALMAN.
 
-Prior iter+N+155 naive MLE AR(1) Kalman LOST to static PILSD by +0.183 RMSE
+A prior naive MLE AR(1) Kalman attempt LOST to static PEBS by +0.183 RMSE
 (Wilcoxon p=0.012) on PRISM temporal 80/20. Diagnosis: MLE picked
 q_alpha=27.9, q_beta=14.0 — both LARGER than population across-user variance
 tau_alpha^2=115.7, tau_beta^2=26.2 — which let the state chase train-
@@ -51,7 +51,7 @@ failure mode:
         ANY non-Kalman time-varying approach can win, or if PRISM's short
         per-user span is fundamentally low-signal.
 
-Baseline: pilsd_static (EB-shrunk), same as prior.
+Baseline: pebs_static (EB-shrunk), same as prior.
 
 Evaluation: temporal 80/20 sorted by generated_datetime; same splits as
 NEG-T1.KALMAN; 1391+ users (min_obs=6); held-out RMSE; paired Wilcoxon;
@@ -669,9 +669,9 @@ def main():
         # pop_slope
         yh = pop_alpha + pop_beta * x_te
         row["rmse_pop_slope"] = float(np.sqrt(np.mean((yh - y_te) ** 2)))
-        # pilsd_static (baseline)
+        # pebs_static (baseline)
         yh = a_s + b_s * x_te
-        row["rmse_pilsd_static"] = float(np.sqrt(np.mean((yh - y_te) ** 2)))
+        row["rmse_pebs_static"] = float(np.sqrt(np.mean((yh - y_te) ** 2)))
         row["alpha_static"] = float(a_s)
         row["beta_static"] = float(b_s)
 
@@ -780,7 +780,7 @@ def main():
     arms_rmse_cols = {
         "no_calib": "rmse_no_calib",
         "pop_slope": "rmse_pop_slope",
-        "pilsd_static": "rmse_pilsd_static",
+        "pebs_static": "rmse_pebs_static",
         "k1_static_anchored": "rmse_k1_static_anchored",
         "k2_cv_q": "rmse_k2_cv_q",
         "k3_eb_shrunk": "rmse_k3_eb_shrunk",
@@ -824,11 +824,11 @@ def main():
         }
 
     comparisons = {
-        "k1_vs_static": paired("rmse_k1_static_anchored", "rmse_pilsd_static"),
-        "k2_vs_static": paired("rmse_k2_cv_q",            "rmse_pilsd_static"),
-        "k3_vs_static": paired("rmse_k3_eb_shrunk",        "rmse_pilsd_static"),
-        "k4_vs_static": paired("rmse_k4_spline",            "rmse_pilsd_static"),
-        "static_vs_pop": paired("rmse_pilsd_static",         "rmse_pop_slope"),
+        "k1_vs_static": paired("rmse_k1_static_anchored", "rmse_pebs_static"),
+        "k2_vs_static": paired("rmse_k2_cv_q",            "rmse_pebs_static"),
+        "k3_vs_static": paired("rmse_k3_eb_shrunk",        "rmse_pebs_static"),
+        "k4_vs_static": paired("rmse_k4_spline",            "rmse_pebs_static"),
+        "static_vs_pop": paired("rmse_pebs_static",         "rmse_pop_slope"),
     }
     print(f"\n=== Paired Wilcoxon (arm_a = time-varying, arm_b = static; "
           f"a<b win% = time-varying wins) ===")
@@ -843,7 +843,7 @@ def main():
     boot_rel = {a: [] for a in arms_rmse_cols if a != "pop_slope"}
     boot_delta = {a: [] for a in arms_rmse_cols if a.startswith("k")}
     cols_arr = {a: pu[c].to_numpy() for a, c in arms_rmse_cols.items()}
-    static_arr = pu["rmse_pilsd_static"].to_numpy()
+    static_arr = pu["rmse_pebs_static"].to_numpy()
     pop_arr = pu["rmse_pop_slope"].to_numpy()
 
     for _ in range(n_boot):
@@ -923,7 +923,7 @@ def main():
         cmp = comparisons[f"{arm_key.split('_')[0]}_vs_static"]
         lo, hi = ci(boot_delta[arm_key])
         if (cmp["mean_delta"] < 0 and cmp["wilcoxon_p"] < 0.05 and hi < 0):
-            verdicts[arm_key] = "HELPS: significantly beats static PILSD"
+            verdicts[arm_key] = "HELPS: significantly beats static PEBS"
         elif (cmp["mean_delta"] > 0 and cmp["wilcoxon_p"] < 0.05 and lo > 0):
             verdicts[arm_key] = "HURTS: significantly worse than static"
         else:

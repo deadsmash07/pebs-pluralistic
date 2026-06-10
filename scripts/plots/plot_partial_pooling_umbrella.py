@@ -39,8 +39,8 @@ from pathlib import Path
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_OUTPUT_PNG = REPO_ROOT / "3_PILSD_Standalone/paper/figure2.png"
-DEFAULT_OUTPUT_SVG = REPO_ROOT / "3_PILSD_Standalone/paper/figure2.svg"
+DEFAULT_OUTPUT_PNG = REPO_ROOT / "3_PEBS_Standalone/paper/figure2.png"
+DEFAULT_OUTPUT_SVG = REPO_ROOT / "3_PEBS_Standalone/paper/figure2.svg"
 
 
 # Colors
@@ -52,7 +52,7 @@ COLOR_LOCAL = "#d62728"   # red = per-cluster local estimate
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(
-        description="Build the PILSD partial-pooling umbrella figure."
+        description="Build the PEBS partial-pooling umbrella figure."
     )
     p.add_argument("--output-png", type=Path, default=DEFAULT_OUTPUT_PNG)
     p.add_argument("--output-svg", type=Path, default=DEFAULT_OUTPUT_SVG)

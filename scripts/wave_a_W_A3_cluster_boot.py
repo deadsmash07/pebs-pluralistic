@@ -3,16 +3,16 @@ on the headline 8.58% RMSE reduction.
 
 Hypothesis under test
 ---------------------
-PILSD's headline 8.58% RMSE reduction is currently bootstrapped by resampling
+PEBS's headline 8.58% RMSE reduction is currently bootstrapped by resampling
 PER-USER mean-RMSE-gain values (cluster-by-user implicit; see
 scripts/t1_loco_with_shrinkage.py L138-L145, eval_user_score_mse_shrunk.py
-relative_improvement_vs_pop_pct). A reviewer Pass-3 attack worth pre-empting:
+relative_improvement_vs_pop_pct). A natural methodological concern:
 "the CI is hiding within-user observation correlation if you bootstrap at the
 naive-iid utterance level" or "your per-user gain stratification masks the
 true sampling variance under iid resampling".
 
 This script re-bootstraps the SAME headline statistic
-(8.58% = 100 * (RMSE_pop_slope - RMSE_pilsd_shrunk) / RMSE_pop_slope, mean
+(8.58% = 100 * (RMSE_pop_slope - RMSE_pebs_shrunk) / RMSE_pop_slope, mean
 per-user) under TWO bootstrap protocols on identical underlying RMSE squared-
 errors:
 
@@ -20,22 +20,22 @@ errors:
     For each bootstrap resample b in 1..B:
       U_b = sample N_users users with replacement
       gain_b = mean_{u in U_b} gain_u
-    where gain_u = 100 * (rmse_u^pop - rmse_u^pilsd) / rmse_u^pop is the
+    where gain_u = 100 * (rmse_u^pop - rmse_u^pebs) / rmse_u^pop is the
     per-user RMSE reduction. This is what the paper currently does.
 
   Protocol B (NAIVE-IID, PER-UTTERANCE):
     For each bootstrap resample b in 1..B:
       For each user u, resample u's utterance-level squared errors
-        (sq_pop_u, sq_pilsd_u) with replacement.
-      Compute rmse_u^pop_b, rmse_u^pilsd_b under the resampled errors.
+        (sq_pop_u, sq_pebs_u) with replacement.
+      Compute rmse_u^pop_b, rmse_u^pebs_b under the resampled errors.
       gain_b = mean_u gain_u_b.
     This treats the within-user squared errors as exchangeable (the iid
     assumption).
 
 If both protocols produce overlapping CIs that exclude zero by similar
-margins, PILSD's headline is robust under both clustering assumptions.
+margins, PEBS's headline is robust under both clustering assumptions.
 If the naive-iid CI is markedly narrower, the user-clustering is hiding
-real within-user dependence (a Pass-3 attack would land). If the cluster
+real within-user dependence (and the concern is valid). If the cluster
 CI is markedly wider but still excludes zero, paper should cite the wider
 CI as the conservative reference.
 
@@ -50,22 +50,22 @@ Reference implementations
 - Efron & Tibshirani (1993) "An Introduction to the Bootstrap" §17.4-§17.6
   (the original treatment).
 
-Verdict (4-class STRICT vocabulary)
------------------------------------
+Outcome classification
+----------------------
 Let CI_cluster = [c_lo, c_hi], CI_iid = [i_lo, i_hi].
 
-  ESTABLISHED-CLUSTER-BOOT-CONFIRMS-NAIVE
+  CONFIRMED-CLUSTER-BOOT-CONFIRMS-NAIVE
       if  c_lo > 0  AND  i_lo > 0  AND  CI overlap fraction > 0.5
 
-  MODERATE-CLUSTER-BOOT-WIDENS-NAIVE
+  PARTIAL-CLUSTER-BOOT-WIDENS-NAIVE
       if  c_lo > 0  AND  i_lo > 0  AND  c_hi - c_lo > 1.3 * (i_hi - i_lo)
       (cluster CI is at least 1.3x wider but still excludes zero)
 
-  PRELIMINARY-INCONCLUSIVE-CLUSTER-CI-NEAR-ZERO
+  TENTATIVE-INCONCLUSIVE-CLUSTER-CI-NEAR-ZERO
       if  c_lo > 0  AND  c_lo < 1.0
       (cluster CI excludes zero only marginally)
 
-  FALSIFIED-NAIVE-CI-WAS-RIGHT
+  REJECTED-NAIVE-CI-WAS-RIGHT
       if  c_lo <= 0  AND  i_lo > 0
       (cluster bootstrap reveals naive CI was the over-confident one)
 
@@ -90,7 +90,7 @@ from scipy import stats
 from tqdm import tqdm
 
 # Paths -----------------------------------------------------------------------
-ROOT = Path(__file__).resolve().parents[2]   # 3_PILSD_Standalone/
+ROOT = Path(__file__).resolve().parents[2]   # 3_PEBS_Standalone/
 T1 = ROOT.parent / "1_Causal_RLHF"
 SCORED = T1 / "data/prism_rm_scored.parquet"
 HEADLINE_PATH = T1 / "results/track1_user_score_mse_shrunk.json"
@@ -105,7 +105,7 @@ MIN_OBS_PER_USER_DEFAULT = 6
 
 
 # ============================================================================
-# G1 helpers — re-implements eval_user_score_mse_shrunk.py headline so we can
+# Helpers — re-implements eval_user_score_mse_shrunk.py headline so we can
 # track per-user, per-utterance squared errors under each method
 # ============================================================================
 
@@ -148,9 +148,9 @@ def compute_per_user_squared_errors(
 
     Returns DataFrame indexed by user_id with columns:
         sq_pop_slope: list[float]    (1 entry per held-out utterance)
-        sq_pilsd_shrunk: list[float]
+        sq_pebs_shrunk: list[float]
         rmse_pop_slope: float
-        rmse_pilsd_shrunk: float
+        rmse_pebs_shrunk: float
         n: int
     """
     rng = np.random.default_rng(args.seed)
@@ -163,7 +163,7 @@ def compute_per_user_squared_errors(
         y = grp.score_user.to_numpy().astype(float)
         folds = kfold_split(n, args.k_folds, rng)
         sq_pop = []
-        sq_pilsd = []
+        sq_pebs = []
         for train_idx, test_idx in folds:
             x_tr, y_tr = x[train_idx], y[train_idx]
             x_te, y_te = x[test_idx], y[test_idx]
@@ -175,25 +175,25 @@ def compute_per_user_squared_errors(
             omega_b = tau_b_sq / (tau_b_sq + Vb) if np.isfinite(Vb) else 0.0
             a_s = omega_a * a + (1 - omega_a) * pop_alpha
             b_s = omega_b * b + (1 - omega_b) * pop_beta
-            sq_pilsd.extend(((a_s + b_s * x_te - y_te) ** 2).tolist())
-        if not sq_pop or not sq_pilsd:
+            sq_pebs.extend(((a_s + b_s * x_te - y_te) ** 2).tolist())
+        if not sq_pop or not sq_pebs:
             continue
         rows.append({
             "user_id": uid,
             "n": n,
             "sq_pop_slope": sq_pop,
-            "sq_pilsd_shrunk": sq_pilsd,
+            "sq_pebs_shrunk": sq_pebs,
             "rmse_pop_slope": float(np.sqrt(np.mean(sq_pop))),
-            "rmse_pilsd_shrunk": float(np.sqrt(np.mean(sq_pilsd))),
+            "rmse_pebs_shrunk": float(np.sqrt(np.mean(sq_pebs))),
         })
     pu = pd.DataFrame(rows)
-    pu["gain_pct"] = 100.0 * (pu.rmse_pop_slope - pu.rmse_pilsd_shrunk) \
+    pu["gain_pct"] = 100.0 * (pu.rmse_pop_slope - pu.rmse_pebs_shrunk) \
                        / pu.rmse_pop_slope
     return pu
 
 
 # ============================================================================
-# G1/G2 — Two bootstrap protocols
+# Two bootstrap protocols
 # ============================================================================
 
 def cluster_bootstrap_by_user(per_user_gains: np.ndarray, n_boot: int,
@@ -212,7 +212,7 @@ def cluster_bootstrap_by_user(per_user_gains: np.ndarray, n_boot: int,
 def naive_iid_bootstrap_per_utterance(per_user: pd.DataFrame, n_boot: int,
                                         seed: int) -> tuple[float, float, float, np.ndarray]:
     """Resample WITHIN each user's squared-error array with replacement
-    (per-utterance iid), recompute rmse_u^pop / rmse_u^pilsd, then take the
+    (per-utterance iid), recompute rmse_u^pop / rmse_u^pebs, then take the
     mean per-user-gain across all users.
 
     This is the strict naive-iid bootstrap on the unit of observation
@@ -221,8 +221,8 @@ def naive_iid_bootstrap_per_utterance(per_user: pd.DataFrame, n_boot: int,
     """
     rng = np.random.default_rng(seed + 7)
     sq_pop_arrays = [np.asarray(v, dtype=np.float64) for v in per_user.sq_pop_slope]
-    sq_pilsd_arrays = [np.asarray(v, dtype=np.float64)
-                        for v in per_user.sq_pilsd_shrunk]
+    sq_pebs_arrays = [np.asarray(v, dtype=np.float64)
+                        for v in per_user.sq_pebs_shrunk]
     n_users = len(sq_pop_arrays)
     boots = np.empty(n_boot)
     for b in range(n_boot):
@@ -231,8 +231,8 @@ def naive_iid_bootstrap_per_utterance(per_user: pd.DataFrame, n_boot: int,
             n_u = len(sq_pop_arrays[i])
             idx = rng.integers(0, n_u, size=n_u)
             rmse_pop_b = float(np.sqrt(np.mean(sq_pop_arrays[i][idx])))
-            rmse_pilsd_b = float(np.sqrt(np.mean(sq_pilsd_arrays[i][idx])))
-            gains[i] = 100.0 * (rmse_pop_b - rmse_pilsd_b) / rmse_pop_b \
+            rmse_pebs_b = float(np.sqrt(np.mean(sq_pebs_arrays[i][idx])))
+            gains[i] = 100.0 * (rmse_pop_b - rmse_pebs_b) / rmse_pop_b \
                         if rmse_pop_b > 1e-9 else 0.0
         boots[b] = float(gains.mean())
     lo, hi = np.percentile(boots, [2.5, 97.5])
@@ -249,17 +249,17 @@ def fully_iid_bootstrap_per_utterance(per_user: pd.DataFrame, n_boot: int,
     rng = np.random.default_rng(seed + 13)
     pop_all = np.concatenate([np.asarray(v, dtype=np.float64)
                                for v in per_user.sq_pop_slope])
-    pilsd_all = np.concatenate([np.asarray(v, dtype=np.float64)
-                                 for v in per_user.sq_pilsd_shrunk])
+    pebs_all = np.concatenate([np.asarray(v, dtype=np.float64)
+                                 for v in per_user.sq_pebs_shrunk])
     n_obs = len(pop_all)
     rmse_p = float(np.sqrt(np.mean(pop_all)))
-    rmse_q = float(np.sqrt(np.mean(pilsd_all)))
+    rmse_q = float(np.sqrt(np.mean(pebs_all)))
     point = 100.0 * (rmse_p - rmse_q) / rmse_p
     boots = np.empty(n_boot)
     for b in range(n_boot):
         idx = rng.integers(0, n_obs, size=n_obs)
         rmse_p_b = float(np.sqrt(np.mean(pop_all[idx])))
-        rmse_q_b = float(np.sqrt(np.mean(pilsd_all[idx])))
+        rmse_q_b = float(np.sqrt(np.mean(pebs_all[idx])))
         boots[b] = 100.0 * (rmse_p_b - rmse_q_b) / rmse_p_b \
                      if rmse_p_b > 1e-9 else 0.0
     lo, hi = np.percentile(boots, [2.5, 97.5])
@@ -267,7 +267,7 @@ def fully_iid_bootstrap_per_utterance(per_user: pd.DataFrame, n_boot: int,
 
 
 # ============================================================================
-# G2 — main pipeline
+# main pipeline
 # ============================================================================
 
 def run(args):
@@ -328,11 +328,11 @@ def run(args):
     print(f"\n[loco] {len(pu)} users with full 4-arm CV completed")
 
     rmse_pop_mean = float(pu.rmse_pop_slope.mean())
-    rmse_pilsd_mean = float(pu.rmse_pilsd_shrunk.mean())
-    headline_gain = 100.0 * (rmse_pop_mean - rmse_pilsd_mean) / rmse_pop_mean
+    rmse_pebs_mean = float(pu.rmse_pebs_shrunk.mean())
+    headline_gain = 100.0 * (rmse_pop_mean - rmse_pebs_mean) / rmse_pop_mean
     headline_gain_paired = float(pu.gain_pct.mean())
     print(f"[headline] mean(RMSE_pop) = {rmse_pop_mean:.3f}  "
-          f"mean(RMSE_pilsd) = {rmse_pilsd_mean:.3f}")
+          f"mean(RMSE_pebs) = {rmse_pebs_mean:.3f}")
     print(f"[headline] gain (mean-of-RMSEs framing) = {headline_gain:.3f}%")
     print(f"[headline] gain (per-user-mean framing) = {headline_gain_paired:.3f}%")
 
@@ -364,7 +364,7 @@ def run(args):
           f"width {pc_w:.3f}")
 
     # ------------------------------------------------------------------------
-    # Verdict assignment per 4-class STRICT vocabulary
+    # Outcome assignment
     # ------------------------------------------------------------------------
     overlap_AB = max(0.0, min(pa_hi, pb_hi) - max(pa_lo, pb_lo)) \
                    / max(pa_w, pb_w, 1e-9)
@@ -374,27 +374,27 @@ def run(args):
 
     if cluster_excludes_zero and iid_excludes_zero and overlap_AB > 0.5 \
        and not cluster_widens:
-        verdict = "ESTABLISHED-CLUSTER-BOOT-CONFIRMS-NAIVE"
+        verdict = "CONFIRMED-CLUSTER-BOOT-CONFIRMS-NAIVE"
     elif cluster_excludes_zero and iid_excludes_zero and cluster_widens:
-        verdict = "MODERATE-CLUSTER-BOOT-WIDENS-NAIVE"
+        verdict = "PARTIAL-CLUSTER-BOOT-WIDENS-NAIVE"
     elif cluster_excludes_zero and pa_lo < 1.0:
-        verdict = "PRELIMINARY-INCONCLUSIVE-CLUSTER-CI-NEAR-ZERO"
+        verdict = "TENTATIVE-INCONCLUSIVE-CLUSTER-CI-NEAR-ZERO"
     elif (not cluster_excludes_zero) and iid_excludes_zero:
-        verdict = "FALSIFIED-NAIVE-CI-WAS-RIGHT"
+        verdict = "REJECTED-NAIVE-CI-WAS-RIGHT"
     elif cluster_excludes_zero and iid_excludes_zero:
         # both exclude zero, similar widths, but not >50% overlap
-        verdict = "ESTABLISHED-CLUSTER-BOOT-CONFIRMS-NAIVE"
+        verdict = "CONFIRMED-CLUSTER-BOOT-CONFIRMS-NAIVE"
     else:
-        verdict = "PRELIMINARY-INCONCLUSIVE-CLUSTER-CI-NEAR-ZERO"
+        verdict = "TENTATIVE-INCONCLUSIVE-CLUSTER-CI-NEAR-ZERO"
     print(f"\n[verdict] {verdict}")
     print(f"  cluster CI overlap with iid CI: {overlap_AB:.3f}")
     print(f"  cluster CI width / iid CI width: {pa_w/pb_w:.3f}x")
 
     # Wilcoxon p-value (per-user paired delta) — robust to any bootstrap
     rng_w = np.random.default_rng(args.seed + 31)
-    delta = pu.rmse_pop_slope.to_numpy() - pu.rmse_pilsd_shrunk.to_numpy()
+    delta = pu.rmse_pop_slope.to_numpy() - pu.rmse_pebs_shrunk.to_numpy()
     w = stats.wilcoxon(delta, alternative="greater")
-    print(f"  Wilcoxon test (PILSD < pop, one-sided): p = {w.pvalue:.3e}")
+    print(f"  Wilcoxon test (PEBS < pop, one-sided): p = {w.pvalue:.3e}")
 
     # ------------------------------------------------------------------------
     # Output
@@ -445,7 +445,7 @@ def run(args):
                 "a true cluster-vs-iid comparison would re-fit OLS and EB "
                 "shrinkage on each bootstrap (a different, much more expensive "
                 "experiment). Re-fitting was not done here because the "
-                "primary attack-class is mis-specified CI not mis-specified "
+                "primary concern is mis-specified CI not mis-specified "
                 "fitting; cluster-vs-iid resampling on fixed predictions is "
                 "the standard intervention.",
                 "We evaluate only the headline 8.58% gain, not OASST2 or "
@@ -460,7 +460,7 @@ def run(args):
     OUT_RESULTS.mkdir(parents=True, exist_ok=True)
     (OUT_RESULTS / "summary.json").write_text(json.dumps(summary, indent=2))
     # Drop the raw squared-error arrays before saving parquet (too large)
-    pu_out = pu.drop(columns=["sq_pop_slope", "sq_pilsd_shrunk"])
+    pu_out = pu.drop(columns=["sq_pop_slope", "sq_pebs_shrunk"])
     pu_out.to_parquet(OUT_RESULTS / "per_user.parquet", index=False)
     print(f"\n[save] {OUT_RESULTS}/summary.json "
           f"({summary['runtime_seconds']:.1f}s)")

@@ -3,7 +3,7 @@
 Two-metric bar chart: each of 4 arms (pop-slope, alpha-only, beta-only, both-full)
 gets two bars side-by-side — relative RMSE improvement (%) and user-win rate (%).
 
-The 'alpha-only' bar should clearly carry ~88 % of the full-PILSD lift, i.e.
+The 'alpha-only' bar should clearly carry ~88 % of the full-PEBS lift, i.e.
 intercept dominates slope.
 """
 from __future__ import annotations
@@ -46,7 +46,7 @@ def main() -> None:
         ("pop-slope",           "pop_slope",  "#8c8c8c"),
         ("alpha-only (intercept)", "alpha_only", "#1f77b4"),
         ("beta-only  (slope)",     "beta_only",  "#ff7f0e"),
-        ("both (full PILSD)",   "both_full",  "#d62728"),
+        ("both (full PEBS)",   "both_full",  "#d62728"),
     ]
 
     labels  = [o[0] for o in order]
@@ -79,7 +79,7 @@ def main() -> None:
     # Intercept-dominance annotation
     ratio = pct[1] / pct[3] * 100 if pct[3] > 0 else 0
     ax.annotate(
-        f"alpha-only recovers {ratio:.1f}% of full-PILSD lift\n"
+        f"alpha-only recovers {ratio:.1f}% of full-PEBS lift\n"
         f"beta-only recovers {pct[2]/pct[3]*100:.1f}%",
         xy=(pct[1] + 0.25, y[1] + h/2),
         xytext=(45, y[1] + 0.6),
@@ -93,7 +93,7 @@ def main() -> None:
     ax.set_axisbelow(True)
 
     plt.tight_layout()
-    plt.savefig(OUT, format="pdf", bbox_inches="tight", metadata={"Creator": "PILSD"})
+    plt.savefig(OUT, format="pdf", bbox_inches="tight", metadata={"Creator": "PEBS"})
     print(f"wrote: {OUT}")
 
 

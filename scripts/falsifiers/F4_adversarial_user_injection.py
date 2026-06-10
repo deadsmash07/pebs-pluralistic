@@ -1,6 +1,6 @@
 """F4 — Adversarial-user injection.
 
-Pre-registered (iter+N+290) falsifier for PILSD's deployment safety story:
+Pre-registered falsifier for PEBS's deployment safety story:
 does the partial-pooling structure degrade gracefully under adversarial
 users, or can a minority of adversaries pull the population prior (and
 shrunken estimates of all other users) toward zero / wrong sign?
@@ -18,18 +18,18 @@ fraction p in {0.10, 0.20, 0.30}:
      a production system would do if it didn't know who is adversarial).
   4. Evaluate held-out RMSE ONLY on the NON-CORRUPTED users' LOCO folds,
      with the SAME conversation-hold-out splits as the clean-reference run.
-  5. Compare PILSD gain vs pop-slope and vs naive no-pooling OLS.
+  5. Compare PEBS gain vs pop-slope and vs naive no-pooling OLS.
 
-Pre-registered criterion (iter+N+290):
-  CONFIRMING:  PILSD gain on clean users remains > 0 and > naive-OLS gain
+Pre-registered criterion:
+  CONFIRMING:  PEBS gain on clean users remains > 0 and > naive-OLS gain
                through p = 0.20 (at p = 0.30, may drop but no catastrophic collapse).
-  FALSIFYING:  PILSD gain on clean users falls BELOW pop-slope (i.e., gain
+  FALSIFYING:  PEBS gain on clean users falls BELOW pop-slope (i.e., gain
                becomes negative or below 0) at p <= 0.20, meaning adversaries
                pulled tau^2/alpha_pop/beta_pop into wrong regime.
 
 Outputs
 -------
-results/falsifiers_iter290/F4_adversarial_user_injection.json
+results/falsifiers/F4_adversarial_user_injection.json
 """
 from __future__ import annotations
 
@@ -43,7 +43,7 @@ import pandas as pd
 ROOT = Path(__file__).resolve().parents[2]
 T1 = ROOT.parent / "1_Causal_RLHF"
 SCORED = T1 / "data/prism_rm_scored.parquet"
-OUT = ROOT / "results/falsifiers_iter290"
+OUT = ROOT / "results/falsifiers"
 
 MIN_CONV_PER_USER = 2
 MIN_UTT_PER_USER = 10
@@ -91,7 +91,7 @@ def nopool_predict(x_tr, y_tr, x_te, alpha_pop, beta_pop):
 
 
 def evaluate_one(df_corrupted: pd.DataFrame, clean_users: set, label: str):
-    """Fit PILSD on df_corrupted (global tau2, alpha_pop, beta_pop use corrupted data);
+    """Fit PEBS on df_corrupted (global tau2, alpha_pop, beta_pop use corrupted data);
     evaluate LOCO RMSE only on clean_users (using their clean data stored in
     df_corrupted since only corrupted users had their score_user flipped)."""
     slope_pop, intercept_pop = np.polyfit(df_corrupted["rm_score"].to_numpy(),
@@ -123,7 +123,7 @@ def evaluate_one(df_corrupted: pd.DataFrame, clean_users: set, label: str):
         conv_ids = g["conversation_id"].unique().tolist()
         if len(conv_ids) < MIN_CONV_PER_USER:
             continue
-        sq_pop, sq_pilsd, sq_nopool = [], [], []
+        sq_pop, sq_pebs, sq_nopool = [], [], []
         n_utt_used = 0
         for hc in conv_ids:
             tr = g[g["conversation_id"] != hc]
@@ -135,10 +135,10 @@ def evaluate_one(df_corrupted: pd.DataFrame, clean_users: set, label: str):
             x_te = te["rm_score"].to_numpy(dtype=np.float64)
             y_te = te["score_user"].to_numpy(dtype=np.float64)
             pred_pop = alpha_pop + beta_pop * x_te
-            pred_pilsd = shrunk_predict(x_tr, y_tr, x_te, alpha_pop, beta_pop, tau2_a, tau2_b)
+            pred_pebs = shrunk_predict(x_tr, y_tr, x_te, alpha_pop, beta_pop, tau2_a, tau2_b)
             pred_nopool = nopool_predict(x_tr, y_tr, x_te, alpha_pop, beta_pop)
             sq_pop.extend(((pred_pop - y_te) ** 2).tolist())
-            sq_pilsd.extend(((pred_pilsd - y_te) ** 2).tolist())
+            sq_pebs.extend(((pred_pebs - y_te) ** 2).tolist())
             sq_nopool.extend(((pred_nopool - y_te) ** 2).tolist())
             n_utt_used += len(y_te)
         if n_utt_used < MIN_UTT_PER_USER:
@@ -146,11 +146,11 @@ def evaluate_one(df_corrupted: pd.DataFrame, clean_users: set, label: str):
         per_user.append({
             "user_id": uid, "n_utt": n_utt_used,
             "rmse_pop": float(np.sqrt(np.mean(sq_pop))),
-            "rmse_pilsd": float(np.sqrt(np.mean(sq_pilsd))),
+            "rmse_pebs": float(np.sqrt(np.mean(sq_pebs))),
             "rmse_nopool": float(np.sqrt(np.mean(sq_nopool))),
         })
     pu = pd.DataFrame(per_user)
-    pu["gain_pilsd_pct"] = 100.0 * (pu["rmse_pop"] - pu["rmse_pilsd"]) / pu["rmse_pop"]
+    pu["gain_pebs_pct"] = 100.0 * (pu["rmse_pop"] - pu["rmse_pebs"]) / pu["rmse_pop"]
     pu["gain_nopool_pct"] = 100.0 * (pu["rmse_pop"] - pu["rmse_nopool"]) / pu["rmse_pop"]
 
     def boot_ci(values):
@@ -163,7 +163,7 @@ def evaluate_one(df_corrupted: pd.DataFrame, clean_users: set, label: str):
         lo, hi = np.percentile(boots, [2.5, 97.5])
         return float(values.mean()), float(lo), float(hi)
 
-    g_pilsd = boot_ci(pu["gain_pilsd_pct"].to_numpy())
+    g_pebs = boot_ci(pu["gain_pebs_pct"].to_numpy())
     g_nopool = boot_ci(pu["gain_nopool_pct"].to_numpy())
 
     return {
@@ -173,9 +173,9 @@ def evaluate_one(df_corrupted: pd.DataFrame, clean_users: set, label: str):
         "tau2_a": tau2_a,
         "tau2_b": tau2_b,
         "rmse_pop_mean": float(pu["rmse_pop"].mean()),
-        "rmse_pilsd_mean": float(pu["rmse_pilsd"].mean()),
+        "rmse_pebs_mean": float(pu["rmse_pebs"].mean()),
         "rmse_nopool_mean": float(pu["rmse_nopool"].mean()),
-        "gain_pilsd_pct": {"mean": g_pilsd[0], "ci95": [g_pilsd[1], g_pilsd[2]]},
+        "gain_pebs_pct": {"mean": g_pebs[0], "ci95": [g_pebs[1], g_pebs[2]]},
         "gain_nopool_pct": {"mean": g_nopool[0], "ci95": [g_nopool[1], g_nopool[2]]},
     }
 
@@ -218,32 +218,32 @@ def main():
         res["n_corrupt_users"] = int(n_corrupt)
         results[f"p_{int(round(p*100))}"] = res
 
-        print(f"  PILSD gain on clean users: {res['gain_pilsd_pct']['mean']:+.3f}pp  "
-              f"CI [{res['gain_pilsd_pct']['ci95'][0]:+.2f}, {res['gain_pilsd_pct']['ci95'][1]:+.2f}]")
+        print(f"  PEBS gain on clean users: {res['gain_pebs_pct']['mean']:+.3f}pp  "
+              f"CI [{res['gain_pebs_pct']['ci95'][0]:+.2f}, {res['gain_pebs_pct']['ci95'][1]:+.2f}]")
         print(f"  naive-OLS gain on clean users: {res['gain_nopool_pct']['mean']:+.3f}pp  "
               f"CI [{res['gain_nopool_pct']['ci95'][0]:+.2f}, {res['gain_nopool_pct']['ci95'][1]:+.2f}]")
 
     # Pre-registered criterion:
-    # confirming if PILSD gain at p=0.20 is still >0 AND >= naive-OLS gain
-    g20 = results["p_20"]["gain_pilsd_pct"]
+    # confirming if PEBS gain at p=0.20 is still >0 AND >= naive-OLS gain
+    g20 = results["p_20"]["gain_pebs_pct"]
     n20 = results["p_20"]["gain_nopool_pct"]
-    pilsd_positive_at_20 = (g20["mean"] > 0 and g20["ci95"][0] > 0)
-    pilsd_beats_nopool_at_20 = (g20["mean"] > n20["mean"])
-    branch = "confirming" if (pilsd_positive_at_20 and pilsd_beats_nopool_at_20) else "falsifying"
+    pebs_positive_at_20 = (g20["mean"] > 0 and g20["ci95"][0] > 0)
+    pebs_beats_nopool_at_20 = (g20["mean"] > n20["mean"])
+    branch = "confirming" if (pebs_positive_at_20 and pebs_beats_nopool_at_20) else "falsifying"
 
     summary = {
         "config": {
             "corruption_levels": CORRUPTION_LEVELS,
             "corruption_scheme": "score_user -> 100 - score_user (PRISM 0..100 scale)",
-            "criterion": "At p=0.20: PILSD gain > 0 (CI > 0) AND > naive-OLS gain",
+            "criterion": "At p=0.20: PEBS gain > 0 (CI > 0) AND > naive-OLS gain",
             "n_bootstrap": N_BOOT,
             "rng_base": RNG_BASE,
         },
         "results_by_corruption": results,
         "branch_disposition": {
             "branch": branch,
-            "pilsd_positive_at_p20": bool(pilsd_positive_at_20),
-            "pilsd_beats_nopool_at_p20": bool(pilsd_beats_nopool_at_20),
+            "pebs_positive_at_p20": bool(pebs_positive_at_20),
+            "pebs_beats_nopool_at_p20": bool(pebs_beats_nopool_at_20),
         },
         "runtime_seconds": float(time.time() - t0),
     }
@@ -253,7 +253,7 @@ def main():
     for p in CORRUPTION_LEVELS:
         key = f"p_{int(round(p*100))}"
         r = results[key]
-        print(f"p={p:.2f}: PILSD={r['gain_pilsd_pct']['mean']:+6.3f}pp  "
+        print(f"p={p:.2f}: PEBS={r['gain_pebs_pct']['mean']:+6.3f}pp  "
               f"naive-OLS={r['gain_nopool_pct']['mean']:+6.3f}pp")
     print(f"\nBranch: {branch.upper()}")
 

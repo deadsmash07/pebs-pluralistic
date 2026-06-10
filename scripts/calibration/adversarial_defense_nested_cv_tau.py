@@ -1,8 +1,8 @@
-"""Adversarial defense: the 8.58% PILSD headline depends on τ² and α_pop,β_pop
+"""Leakage check: the 8.58% PEBS headline depends on τ² and α_pop,β_pop
 estimated IN-SAMPLE (including the rows used at test time within k-fold CV).
 
-ATTACK (target leakage in hyperparameter estimation)
----------------------------------------------------
+CONCERN (target leakage in hyperparameter estimation)
+-----------------------------------------------------
 The headline eval_user_score_mse_shrunk.py computes:
 
     # Pre-pass: per-user OLS on ALL data
@@ -17,7 +17,7 @@ The headline eval_user_score_mse_shrunk.py computes:
         a_shrunk = omega * a_tr + (1 - omega) * pop_alpha  # <-- pop leaked
 
 Both τ² and (α_pop, β_pop) are estimated from rows that include the test-fold
-labels. A reviewer can reasonably object: the shrinkage-intensity schedule
+labels. One can reasonably object: the shrinkage-intensity schedule
 knows what answers are being held out. A deployment-realistic estimator can
 only use in-training-fold rows.
 
@@ -40,11 +40,11 @@ Report the paper's 8.58% vs the nested-CV estimate. Compute:
   * Fold-level τ² dispersion
 
 If the two agree within noise (e.g., nested gain > 0.9× of paper gain,
-overlapping CIs), the attack is DEFEATED. If nested gain collapses (e.g.,
-< half of paper gain, Wilcoxon n.s.), the attack is REFUTED and the
+overlapping CIs), the concern is resolved. If nested gain collapses (e.g.,
+< half of paper gain, Wilcoxon n.s.), the leakage is material and the
 paper claim must be softened.
 
-Dependencies: numpy, pandas, scipy (CPU). No H100 needed.
+Dependencies: numpy, pandas, scipy (CPU). No GPU needed.
 
 Expected runtime: ~30-60s on 1394 users × 5 folds × 4 arms.
 """
@@ -152,7 +152,7 @@ def run_full_leakage_arm(df: pd.DataFrame, k_folds: int, rng, min_obs: int):
         x = grp.rm_score.to_numpy()
         y = grp.score_user.to_numpy().astype(float)
         folds = kfold_split(n, k_folds, rng)
-        sq = {"pop_slope": [], "pilsd_shrunk": []}
+        sq = {"pop_slope": [], "pebs_shrunk": []}
         for tr, te in folds:
             if len(te) == 0:
                 continue
@@ -168,12 +168,12 @@ def run_full_leakage_arm(df: pd.DataFrame, k_folds: int, rng, min_obs: int):
             a_s = omega_a * a + (1 - omega_a) * pop_alpha_global
             b_s = omega_b * b + (1 - omega_b) * pop_beta_global
             y_hat_sh = a_s + b_s * x_te
-            sq["pilsd_shrunk"].extend(((y_hat_sh - y_te) ** 2).tolist())
+            sq["pebs_shrunk"].extend(((y_hat_sh - y_te) ** 2).tolist())
         per_user_rows.append(
             {
                 "user_id": uid,
                 "rmse_pop_slope": float(np.sqrt(np.mean(sq["pop_slope"]))),
-                "rmse_pilsd_shrunk": float(np.sqrt(np.mean(sq["pilsd_shrunk"]))),
+                "rmse_pebs_shrunk": float(np.sqrt(np.mean(sq["pebs_shrunk"]))),
             }
         )
     return (
@@ -262,7 +262,7 @@ def run_nested_cv_arm(df: pd.DataFrame, k_folds: int, rng, min_obs: int):
     # Now compute per-user RMSE using per-fold hyperparams
     for uid in uids_valid:
         entry = user_fold_map[uid]
-        sq = {"pop_slope": [], "pilsd_shrunk": []}
+        sq = {"pop_slope": [], "pebs_shrunk": []}
         for fold_i in range(k_folds):
             fp = entry.get("fold_params", {}).get(fold_i)
             if fp is None:
@@ -285,14 +285,14 @@ def run_nested_cv_arm(df: pd.DataFrame, k_folds: int, rng, min_obs: int):
             a_s = omega_a * fp["a"] + (1 - omega_a) * fp["pop_a"]
             b_s = omega_b * fp["b"] + (1 - omega_b) * fp["pop_b"]
             y_hat_sh = a_s + b_s * x_te
-            sq["pilsd_shrunk"].extend(((y_hat_sh - y_te) ** 2).tolist())
+            sq["pebs_shrunk"].extend(((y_hat_sh - y_te) ** 2).tolist())
         if len(sq["pop_slope"]) == 0:
             continue
         per_user_rows.append(
             {
                 "user_id": uid,
                 "rmse_pop_slope": float(np.sqrt(np.mean(sq["pop_slope"]))),
-                "rmse_pilsd_shrunk": float(np.sqrt(np.mean(sq["pilsd_shrunk"]))),
+                "rmse_pebs_shrunk": float(np.sqrt(np.mean(sq["pebs_shrunk"]))),
             }
         )
     return pd.DataFrame(per_user_rows), fold_tau_records
@@ -300,7 +300,7 @@ def run_nested_cv_arm(df: pd.DataFrame, k_folds: int, rng, min_obs: int):
 
 def compute_arm_summary(pu: pd.DataFrame, arm_label: str):
     pop = pu.rmse_pop_slope.to_numpy()
-    sh = pu.rmse_pilsd_shrunk.to_numpy()
+    sh = pu.rmse_pebs_shrunk.to_numpy()
     rel_gain_pct = 100 * (pop.mean() - sh.mean()) / pop.mean()
     wilcox = stats.wilcoxon(sh, pop, alternative="less")  # test sh < pop
     # 64.2% figure from paper
@@ -309,7 +309,7 @@ def compute_arm_summary(pu: pd.DataFrame, arm_label: str):
         "arm": arm_label,
         "n_users": int(len(pu)),
         "mean_rmse_pop_slope": float(pop.mean()),
-        "mean_rmse_pilsd_shrunk": float(sh.mean()),
+        "mean_rmse_pebs_shrunk": float(sh.mean()),
         "relative_gain_pct": float(rel_gain_pct),
         "wilcoxon_p": float(wilcox.pvalue),
         "user_win_rate": win_rate,
@@ -323,7 +323,7 @@ def bootstrap_ci(pu: pd.DataFrame, B: int, seed: int):
     Returns 95% percentile CI on (mean_rmse_pop − mean_rmse_shrunk) / mean_rmse_pop.
     """
     pop = pu.rmse_pop_slope.to_numpy()
-    sh = pu.rmse_pilsd_shrunk.to_numpy()
+    sh = pu.rmse_pebs_shrunk.to_numpy()
     n = len(pu)
     rng = np.random.default_rng(seed)
     gains = []
@@ -358,7 +358,7 @@ def main():
 
     summary_A = compute_arm_summary(pu_A, "paper_leaked")
     print(f"  mean RMSE pop-slope = {summary_A['mean_rmse_pop_slope']:.3f}")
-    print(f"  mean RMSE shrunk    = {summary_A['mean_rmse_pilsd_shrunk']:.3f}")
+    print(f"  mean RMSE shrunk    = {summary_A['mean_rmse_pebs_shrunk']:.3f}")
     print(f"  RELATIVE GAIN       = {summary_A['relative_gain_pct']:+.3f}%")
     print(f"  Wilcoxon p          = {summary_A['wilcoxon_p']:.3e}")
     print(f"  user win-rate       = {summary_A['user_win_rate']:.3%}")
@@ -377,7 +377,7 @@ def main():
 
     summary_B = compute_arm_summary(pu_B, "nested_cv_honest")
     print(f"  mean RMSE pop-slope = {summary_B['mean_rmse_pop_slope']:.3f}")
-    print(f"  mean RMSE shrunk    = {summary_B['mean_rmse_pilsd_shrunk']:.3f}")
+    print(f"  mean RMSE shrunk    = {summary_B['mean_rmse_pebs_shrunk']:.3f}")
     print(f"  RELATIVE GAIN       = {summary_B['relative_gain_pct']:+.3f}%")
     print(f"  Wilcoxon p          = {summary_B['wilcoxon_p']:.3e}")
     print(f"  user win-rate       = {summary_B['user_win_rate']:.3%}")
@@ -409,16 +409,16 @@ def main():
     # Both arms iterate the SAME users with SAME folds (same RNG seed), so
     # we can pair the per-user shrunk RMSEs.
     merged = pd.merge(
-        pu_A[["user_id", "rmse_pilsd_shrunk"]].rename(
-            columns={"rmse_pilsd_shrunk": "rmse_A"}
+        pu_A[["user_id", "rmse_pebs_shrunk"]].rename(
+            columns={"rmse_pebs_shrunk": "rmse_A"}
         ),
-        pu_B[["user_id", "rmse_pilsd_shrunk"]].rename(
-            columns={"rmse_pilsd_shrunk": "rmse_B"}
+        pu_B[["user_id", "rmse_pebs_shrunk"]].rename(
+            columns={"rmse_pebs_shrunk": "rmse_B"}
         ),
         on="user_id",
     )
     delta = merged.rmse_B - merged.rmse_A  # positive => nested is worse
-    print(f"\n=== PAIRED A-vs-B DIFFERENCE (pilsd_shrunk only) ===")
+    print(f"\n=== PAIRED A-vs-B DIFFERENCE (pebs_shrunk only) ===")
     print(f"  median(B - A) RMSE = {delta.median():+.4f}")
     print(f"  mean(B - A) RMSE   = {delta.mean():+.4f}")
     print(f"  fraction B ≥ A     = {(delta >= 0).mean():.3%}")
@@ -475,7 +475,7 @@ def main():
 
     # ---- Save ----
     out = {
-        "attack": (
+        "concern": (
             "τ² and pop-slope are estimated from ALL rows (including k-fold test rows) "
             "in the paper's evaluation script. This is target leakage in the "
             "hyperparameter-estimation pass. Does the headline 8.58% survive when τ² "

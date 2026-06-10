@@ -2,12 +2,12 @@
 """
 t1_semantic_alpha_beta_correlation.py
 --------------------------------------
-Tests whether PILSD's fitted per-user (alpha_j, beta_j) calibration parameters
+Tests whether PEBS's fitted per-user (alpha_j, beta_j) calibration parameters
 correlate with SEMANTIC features of PRISM users' self-descriptions and stated
 preferences.
 
 Hypothesis: the 8.58% RMSE improvement from per-user calibration has NO
-demographic explanation (Track 1 heterogeneity memo). This script extends that
+demographic explanation. This script extends that
 null-finding test to SEMANTIC features:
 
     1. Free-text TF-IDF -> PCA top-5 PCs   (self_description, system_string)

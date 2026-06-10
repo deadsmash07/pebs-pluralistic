@@ -1,10 +1,10 @@
-"""PILSD cold-start adaptation curve on PRISM.
+"""PEBS cold-start adaptation curve on PRISM.
 
 Research question: for a NEW user with a small labeled-utterance budget k,
-how does PILSD's per-user calibration compare to pop-slope (the best we
-can do without per-user data)? At what k does PILSD break even?
+how does PEBS's per-user calibration compare to pop-slope (the best we
+can do without per-user data)? At what k does PEBS break even?
 
-This is the paper claim reviewers will ask about: "PILSD requires labeled
+This is the paper claim reviewers will ask about: "PEBS requires labeled
 utterances per user. Is that practical? What's the minimum budget?"
 
 Design
@@ -16,7 +16,7 @@ Design
         - Record held-out RMSE
     - Also: pop-slope RMSE on same held-out (using train-user-only fit)
     - Also: no-calib RMSE on same held-out
-- Compute break-even k: smallest k where median PILSD RMSE ≤ median pop-slope RMSE
+- Compute break-even k: smallest k where median PEBS RMSE ≤ median pop-slope RMSE
 
 Honest baselines
 ----------------
@@ -120,15 +120,15 @@ def main():
         rmse_nocal = float(np.sqrt(np.mean((train_mean_y - y) ** 2)))
         rec["rmse_no_calib"] = rmse_nocal
 
-        # PILSD at each budget k: fit on first k, eval on remaining n-k
+        # PEBS at each budget k: fit on first k, eval on remaining n-k
         for k in budgets:
             if k + 2 > n:   # Need at least 2 held-out
-                rec[f"rmse_pilsd_k{k}"] = np.nan
+                rec[f"rmse_pebs_k{k}"] = np.nan
                 continue
             alpha_j, beta_j = ols_intercept_slope(x[:k], y[:k])
-            y_hat_pilsd = alpha_j + beta_j * x[k:]
-            rmse_pilsd = float(np.sqrt(np.mean((y_hat_pilsd - y[k:]) ** 2)))
-            rec[f"rmse_pilsd_k{k}"] = rmse_pilsd
+            y_hat_pebs = alpha_j + beta_j * x[k:]
+            rmse_pebs = float(np.sqrt(np.mean((y_hat_pebs - y[k:]) ** 2)))
+            rec[f"rmse_pebs_k{k}"] = rmse_pebs
 
         per_user_rows.append(rec)
 
@@ -139,39 +139,39 @@ def main():
 
     curve = {"budgets": budgets, "per_k": {}}
     for k in budgets:
-        col = f"rmse_pilsd_k{k}"
+        col = f"rmse_pebs_k{k}"
         vals = pu[col].dropna()
         if len(vals) < 10:
             continue
-        # Paired RMSE deltas: PILSD vs pop-slope and no-calib on the SAME holdout users
+        # Paired RMSE deltas: PEBS vs pop-slope and no-calib on the SAME holdout users
         paired_pop = pu.dropna(subset=[col])
         delta_vs_pop = paired_pop[col] - paired_pop.rmse_pop_slope
-        # Positive = PILSD is WORSE at this budget
+        # Positive = PEBS is WORSE at this budget
         w_pop = stats.wilcoxon(paired_pop[col], paired_pop.rmse_pop_slope, alternative="two-sided") \
                 if len(paired_pop) >= 10 else None
         curve["per_k"][k] = {
             "n_users": int(len(vals)),
-            "rmse_pilsd": {"mean": float(vals.mean()), "median": float(vals.median()),
+            "rmse_pebs": {"mean": float(vals.mean()), "median": float(vals.median()),
                           "p25": float(vals.quantile(0.25)), "p75": float(vals.quantile(0.75))},
             "vs_pop_slope": {
-                "mean_delta_pilsd_minus_pop": float(delta_vs_pop.mean()),
+                "mean_delta_pebs_minus_pop": float(delta_vs_pop.mean()),
                 "median_delta": float(delta_vs_pop.median()),
-                "frac_pilsd_wins": float((delta_vs_pop < 0).mean()),
+                "frac_pebs_wins": float((delta_vs_pop < 0).mean()),
                 "wilcoxon_p": float(w_pop.pvalue) if w_pop else None,
             },
         }
         p_str = f"{w_pop.pvalue:.2g}" if w_pop else "n/a"
-        print(f"  k={k:2d}: PILSD mean RMSE={vals.mean():.3f}  "
+        print(f"  k={k:2d}: PEBS mean RMSE={vals.mean():.3f}  "
               f"median={vals.median():.3f}  "
               f"Δ vs pop={delta_vs_pop.mean():+.3f} "
               f"(wins {100*(delta_vs_pop<0).mean():.0f}%, "
               f"p={p_str})")
 
-    # Break-even k: smallest budget where PILSD's mean RMSE ≤ pop-slope's mean RMSE
+    # Break-even k: smallest budget where PEBS's mean RMSE ≤ pop-slope's mean RMSE
     pop_mean_rmse = pu.rmse_pop_slope.mean()
     break_even = None
     for k in budgets:
-        col = f"rmse_pilsd_k{k}"
+        col = f"rmse_pebs_k{k}"
         if col not in pu.columns:
             continue
         m = pu[col].mean()
@@ -205,7 +205,7 @@ def main():
     Path(args.output_path).write_text(json.dumps(out, indent=2))
     pu.to_parquet(Path(args.output_path).with_suffix(".parquet"))
     print(f"\n[save] {args.output_path}")
-    print(f"\nBreak-even k (PILSD beats pop-slope in mean RMSE): {break_even}")
+    print(f"\nBreak-even k (PEBS beats pop-slope in mean RMSE): {break_even}")
 
 
 if __name__ == "__main__":

@@ -1,6 +1,6 @@
-"""Extract policy/clipfrac_avg distributions from 7B PPO backfill logs (iter+N+172).
+"""Extract policy/clipfrac_avg distributions from 7B PPO backfill logs.
 
-Motivation: adversarial-review attack #3 — "clipped PPO ≠ Boltzmann fixed
+Motivation: a theoretical-scope concern — "clipped PPO ≠ Boltzmann fixed
 point" — demands we disclose the clipping-binding rate in training to defend
 Prop T1.MI's asymptotic-under-non-binding-clipping scope. We parse the
 training log for each seed × arm, extract the per-step `policy/clipfrac_avg`
@@ -18,7 +18,7 @@ import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-LOG_PATH = Path("/tmp/backfill_nohup.log")  # pulled from H100 via scp
+LOG_PATH = Path("/tmp/backfill_nohup.log")  # copied from the training host
 
 # Regex: `'policy/clipfrac_avg': 0.0188964381814003,`
 CLIPFRAC_RE = re.compile(r"'policy/clipfrac_avg': ([0-9.eE+-]+)")

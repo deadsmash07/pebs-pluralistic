@@ -1,0 +1,18 @@
+# Core numerics and statistics
+numpy>=1.26
+pandas>=2.0
+scipy>=1.11
+statsmodels>=0.14
+scikit-learn>=1.3
+matplotlib>=3.8
+tqdm>=4.66
+pyarrow>=14.0
+
+# Only needed for the reward-model fine-tuning and DPO scripts
+# (scripts/training/, q6_* DPO, cross-base probes); CPU-only analysis
+# scripts run without these.
+torch>=2.2
+transformers>=4.44
+datasets>=2.19
+peft>=0.11
+trl>=0.12

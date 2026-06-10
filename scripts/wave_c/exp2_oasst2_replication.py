@@ -1,18 +1,18 @@
-"""Wave C EXP-2: OASST2 cross-corpus replication of PILSD headline.
+"""Wave C EXP-2: OASST2 cross-corpus replication of PEBS headline.
 
-Closes NeurIPS Pass 5 + Pluralistic generalization reviewer attacks: "PILSD
-only works on PRISM" / "in-distribution overfit". Hypothesis: PILSD's 8.58%
+Addresses the generalization concern that PEBS only works on PRISM
+(in-distribution overfit). Hypothesis: PEBS's 8.58%
 RMSE reduction on PRISM replicates on OASST2 (Köpf et al. 2023; Kirk-style
 power-author cohort) with REAL per-message author IDs (not pseudo-rater
 attribute axes as HelpSteer2 used).
 
-This wraps the existing 2-stage pipeline (already audited + smoke-tested
-under PREREG `1_Causal_RLHF/scripts/falsifiers/PREREG_F_T1_OASST2_REPLICATION.md`):
+This wraps the existing 2-stage pipeline (with a pre-specified decision
+rule fixed before the run):
 
     Stage A — score OASST2 messages with Qwen2.5-7B-Instruct mean-LL
               (1_Causal_RLHF/scripts/score_oasst2_with_qwen7b.py)
-    Stage B — fit + evaluate PILSD calibrator with cluster-bootstrap CIs
-              (1_Causal_RLHF/scripts/eval_oasst2_pilsd_calibrator.py)
+    Stage B — fit + evaluate PEBS calibrator with cluster-bootstrap CIs
+              (1_Causal_RLHF/scripts/eval_oasst2_pebs_calibrator.py)
 
 The wrapper is a single binary that:
   1. Verifies prerequisites (parquet trees / venv / model cache).
@@ -20,49 +20,44 @@ The wrapper is a single binary that:
      SHA-matches a small diagnostic header — protects against silent re-uses).
   3. Runs Stage B with B=4000 cluster-bootstrap reps.
   4. Emits `results/track1_oasst2_replication/{summary.json, per_user.parquet}`
-     with verdict-class STRICT.
+     with the pre-specified outcome classification.
 
-12-gate audit (Skill: research-grade-code-audit-pre-launch):
-  G1 math: BOTH stages inherit verbatim from PRISM canonical
+Design notes:
+  - Math: BOTH stages inherit verbatim from the PRISM canonical scripts
        (eval_user_score_mse_shrunk.py for B; score_prism_utterances.py for A).
-  G2 hypothesis-vs-design: tests PILSD's 8.58% RMSE-reduction headline
+  - Hypothesis: tests PEBS's 8.58% RMSE-reduction headline
        replication on REAL author IDs (NOT pseudo-rater attribute axes).
-  G3 no silent-bypass: stage-A output_parquet existence check is BY-PATH
+  - No silent-bypass: stage-A output_parquet existence check is BY-PATH
        only; we always re-run Stage A if --force-rescore or if the cached
-       file's row count is below the smoke threshold.
-  G4 eval pipeline integrity: Stage B inherits the canonical 4-arm RMSE
-       eval (no_calib / pop_slope / per_user_OLS / PILSD_EB_shrunk);
-       gain_pct = (rmse_pop_slope - rmse_pilsd_shrunk) / rmse_pop_slope.
-  G5 reference-implementation: BOTH stages already audited+committed
-       (Stage A: 92e4707; Stage B: e2c1a8f) and smoke-PASS (G1-G5)
-       at `results/falsifiers/F_T1_OASST2_REPLICATION_smoke/smoke_summary.json`.
-  G6 hyperparameter sanity: matches PRISM headline conventions
+       file's row count is below the quick-run threshold.
+  - Eval pipeline: Stage B inherits the canonical 4-arm RMSE
+       eval (no_calib / pop_slope / per_user_OLS / PEBS_EB_shrunk);
+       gain_pct = (rmse_pop_slope - rmse_pebs_shrunk) / rmse_pop_slope.
+  - Hyperparameters: matches PRISM headline conventions
        (min_obs_per_user=6 / k_folds=5 / B=4000 cluster-bootstrap).
-  G7 per-step diagnostic: Stage A logs scoring rate + ETA every 200 rows;
+  - Diagnostics: Stage A logs scoring rate + ETA every 200 rows;
        Stage B logs per-fold per-arm RMSE + cluster-bootstrap progress.
-  G8 reproducibility: seed=42 / RNG_BOOT=20260420; cache fingerprint of
+  - Reproducibility: seed=42 / RNG_BOOT=20260420; cache fingerprint of
        parquet via SHA-256 persisted in summary.json.
-  G9 output schema: 4-class STRICT verdict per PREREG §2.6 decision rule.
-  G10 compute envelope: Stage A ~10-12h on H100 nf4 7B (~7-9k OASST2
+  - Compute: Stage A ~10-12h on a single 80GB GPU, nf4 7B (~7-9k OASST2
        English assistant messages × ~1 row/s); Stage B ~10-15min CPU.
-  G11 anti-overfitting: not theory-claiming.
-  G12 honest-disclosure: 4-class verdict explicitly enumerates NULL
-       (CI straddles zero ⇒ PRELIMINARY-INCONCLUSIVE-OASST2) and FALSIFIED
-       (CI strictly negative ⇒ FALSIFIED-OASST2-DOES-NOT-REPLICATE)
+  - The decision rule explicitly enumerates NULL
+       (CI straddles zero ⇒ TENTATIVE-INCONCLUSIVE-OASST2) and REJECTED
+       (CI strictly negative ⇒ REJECTED-OASST2-DOES-NOT-REPLICATE)
        branches; PARTIAL captures the 1-3pp band.
 
-4-class verdict-class STRICT (Skill: honest-disclosure §6.3):
-  ESTABLISHED-OASST2-CONFIRMS-PRISM            gain in [+5, +12]; CI
+Outcome classification:
+  CONFIRMED-OASST2-CONFIRMS-PRISM            gain in [+5, +12]; CI
                                                 excludes 0; matches PRISM
                                                 +8.58% headline within
                                                 ±3pp.
-  MODERATE-OASST2-PARTIAL-CONFIRMS              gain in [+1, +5]; CI
+  PARTIAL-OASST2-PARTIAL-CONFIRMS              gain in [+1, +5]; CI
                                                 excludes 0; weaker than
                                                 PRISM but directionally
                                                 consistent.
-  PRELIMINARY-INCONCLUSIVE-OASST2               CI straddles 0; gain
+  TENTATIVE-INCONCLUSIVE-OASST2               CI straddles 0; gain
                                                 in [-1, +1] band.
-  FALSIFIED-OASST2-DOES-NOT-REPLICATE           CI strictly negative;
+  REJECTED-OASST2-DOES-NOT-REPLICATE           CI strictly negative;
                                                 PRISM headline does NOT
                                                 generalize ⇒ paper claim
                                                 must be SCOPE-LIMITED to
@@ -71,14 +66,12 @@ The wrapper is a single binary that:
 Output
 ------
 ``results/track1_oasst2_replication/{summary.json, per_user.parquet}``
-+ Tab cross-corpus row (NeurIPS) + 1-paragraph §3.X cross-corpus paragraph
-+ 1-line Pluralistic §Lim reference.
 
-Honest-disclosure note (added 2026-05-03 ~01:48 IST after Stage-B-fix subagent)
-------------------------------------------------------------------------------
-The 2026-05-02 first-launch run of this wrapper failed at Stage B with
+Note on a CLI fix
+-----------------
+A first launch of this wrapper failed at Stage B with
 `unrecognized arguments: --n-boot 4000` because the wrapper's CLI mapping to
-`1_Causal_RLHF/scripts/eval_oasst2_pilsd_calibrator.py` was authored against a
+`1_Causal_RLHF/scripts/eval_oasst2_pebs_calibrator.py` was authored against a
 provisional interface; the downstream script's actual CLI uses
 ``--seeds INT [INT ...]`` (plural list) + ``--bootstrap-B INT`` +
 ``--bootstrap-seed INT`` (NOT ``--seed`` + ``--n-boot``), and writes per-seed
@@ -86,9 +79,9 @@ sub-dirs as ``seed_<seed>`` UNpadded (NOT ``seed_<NNN>`` zero-padded). This
 patch fixes the CLI mapping and the per-seed-dir naming. Stage A (Qwen2.5-7B
 mean-LL scoring) succeeded fully in the first run (32125 rows / 2049 authors;
 sha256 ``b6e21819...``); the cached parquet is reusable so Stage A is SKIPPED
-on the second-launch path. The science (PILSD-EB-shrunk RMSE estimator;
-cluster-bootstrap CI; verdict-class assignment) is UNCHANGED — this is purely
-a calling-convention fix. CPU smoke verifies the patched CLI mapping
+on the second-launch path. The science (PEBS-EB-shrunk RMSE estimator;
+cluster-bootstrap CI; outcome assignment) is UNCHANGED — this is purely
+a calling-convention fix. A CPU quick-run verifies the patched CLI mapping
 end-to-end before GPU re-launch.
 
 References
@@ -115,7 +108,7 @@ import traceback
 from pathlib import Path
 from typing import Any
 
-ROOT = Path(__file__).resolve().parents[3]  # 3_PILSD_Standalone/
+ROOT = Path(__file__).resolve().parents[3]  # 3_PEBS_Standalone/
 T1 = ROOT.parent / "1_Causal_RLHF"
 sys.path.insert(0, str(ROOT / "scripts"))
 from _repo_paths import STANDALONE_RESULTS  # noqa: E402
@@ -132,10 +125,10 @@ K_FOLDS = 5
 MIN_AUTHOR_MESSAGES_FOR_SCORING = 3
 MAX_PROMPT_TOKENS = 256
 MAX_RESPONSE_TOKENS = 256
-MIN_SCORED_ROWS_FOR_VALID_CACHE = 1000  # G3: re-run Stage A if cache < this
+MIN_SCORED_ROWS_FOR_VALID_CACHE = 1000  # re-run Stage A if cache < this
 MODEL_ID_DEFAULT = "Qwen/Qwen2.5-7B-Instruct"
 
-# Verdict thresholds (per PREREG §2.6)
+# Pre-specified outcome thresholds
 PASS_LO, PASS_HI = 5.0, 12.0
 PARTIAL_LO, PARTIAL_HI = 1.0, 5.0
 NULL_LO, NULL_HI = -1.0, 1.0
@@ -145,7 +138,7 @@ def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser()
     p.add_argument("--trees-path", required=True,
                    help=("Path to OASST2 ready-trees jsonl.gz dump on the "
-                         "GPU pod, e.g. /workspace/.hf_cache/oasst2/"
+                         "GPU host, e.g. /workspace/.hf_cache/oasst2/"
                          "2023-11-05_oasst2_ready.trees.jsonl.gz"))
     p.add_argument("--scored-parquet",
                    default=str(T1 / "data" / "oasst2"
@@ -177,7 +170,7 @@ def file_sha256(p: Path) -> str:
 
 
 def stage_a_needs_rerun(parquet: Path, force: bool, min_rows: int) -> bool:
-    """G3: decide whether to re-run Stage A. Re-run if (a) --force-rescore
+    """Decide whether to re-run Stage A. Re-run if (a) --force-rescore
     or (b) parquet missing or (c) parquet has fewer than `min_rows` rows."""
     if force:
         return True
@@ -228,11 +221,11 @@ def run_stage_a(args: argparse.Namespace) -> dict:
 
 
 def run_stage_b(args: argparse.Namespace) -> dict:
-    """Stage B — fit + evaluate PILSD calibrator on OASST2 with cluster-
+    """Stage B — fit + evaluate PEBS calibrator on OASST2 with cluster-
     bootstrap CIs.
 
     NOTE on CLI mapping: the downstream
-    `1_Causal_RLHF/scripts/eval_oasst2_pilsd_calibrator.py` script's argparse
+    `1_Causal_RLHF/scripts/eval_oasst2_pebs_calibrator.py` script's argparse
     interface uses (a) plural `--seeds INT [INT ...]` (nargs="+"), NOT
     `--seed INT`; (b) `--bootstrap-B INT`, NOT `--n-boot INT`; and
     (c) `--bootstrap-seed INT` with default 42. It also creates its own
@@ -241,7 +234,7 @@ def run_stage_b(args: argparse.Namespace) -> dict:
     let Stage B create the unpadded seed sub-dir itself, and read back from
     that unpadded path.
     """
-    script = T1 / "scripts" / "eval_oasst2_pilsd_calibrator.py"
+    script = T1 / "scripts" / "eval_oasst2_pebs_calibrator.py"
     if not script.exists():
         raise FileNotFoundError(f"Stage B script missing: {script}")
 
@@ -275,17 +268,16 @@ def run_stage_b(args: argparse.Namespace) -> dict:
 
 
 def assign_verdict_class(gain: float, ci_lo: float, ci_hi: float) -> str:
-    """4-class verdict-class STRICT per PREREG §2.6 + Skill: honest-disclosure
-    §6.3."""
+    """Pre-specified outcome classification."""
     excludes_zero_pos = ci_lo > 0
     excludes_zero_neg = ci_hi < 0
     if PASS_LO <= gain <= PASS_HI and excludes_zero_pos:
-        return "ESTABLISHED-OASST2-CONFIRMS-PRISM"
+        return "CONFIRMED-OASST2-CONFIRMS-PRISM"
     if PARTIAL_LO <= gain <= PARTIAL_HI and excludes_zero_pos:
-        return "MODERATE-OASST2-PARTIAL-CONFIRMS"
+        return "PARTIAL-OASST2-PARTIAL-CONFIRMS"
     if excludes_zero_neg or gain < NULL_LO:
-        return "FALSIFIED-OASST2-DOES-NOT-REPLICATE"
-    return "PRELIMINARY-INCONCLUSIVE-OASST2"
+        return "REJECTED-OASST2-DOES-NOT-REPLICATE"
+    return "TENTATIVE-INCONCLUSIVE-OASST2"
 
 
 def main():
@@ -304,18 +296,11 @@ def main():
         "k_folds": int(args.k_folds),
         "min_obs_per_user": int(args.min_obs_per_user),
         "model_id": args.model_id,
-        "skill_citations": [
-            "Skill: research-grade-code-audit-pre-launch v1 G1-G12",
-            "Skill: honest-disclosure §6.3 SCOPE-not-RETRACT (4-class STRICT)",
-            "Skill: post-experiment-discipline-3-track Step 5+7",
-            "Skill: launch-runpod-h100-job",
-            "Skill: gpu-artifact-sync",
-        ],
         "anomaly_branches_fired": [],
         "stages": {},
     }
 
-    print(f"[Wave-C EXP-2] OASST2 cross-corpus PILSD replication")
+    print(f"[Wave-C EXP-2] OASST2 cross-corpus PEBS replication")
     print(f"[output-dir] {out_dir}")
     print(f"[scored-parquet] {args.scored_parquet}")
 
@@ -335,7 +320,7 @@ def main():
             summary_path.write_text(json.dumps(summary, indent=2))
             raise
     else:
-        # G3: cache reuse path; record the SHA + row count.
+        # Cache reuse path; record the SHA + row count.
         import pandas as pd
         n = len(pd.read_parquet(parquet, columns=["user_id"]))
         summary["stages"]["stage_a"] = {
@@ -362,7 +347,7 @@ def main():
         raise
 
     # ------------------------------------------------------------------
-    # Stage B -> verdict-class
+    # Stage B -> outcome classification
     # ------------------------------------------------------------------
     seed_dir = Path(stage_b_meta["stage_b_seed_dir"])
     stage_b_output = seed_dir / "output.json"
@@ -406,7 +391,7 @@ def main():
         "n_users_post_filter": n_users,
         "n_obs_total": n_obs,
         "rmse_baseline_pop": float(stage_b_result.get("rmse_baseline_pop", float("nan"))),
-        "rmse_pilsd_shrunk": float(stage_b_result.get("rmse_pilsd_shrunk", float("nan"))),
+        "rmse_pebs_shrunk": float(stage_b_result.get("rmse_pebs_shrunk", float("nan"))),
         "stage_b_full_output": stage_b_result,
         "anomaly_branches_fired": anomalies,
     })
@@ -418,7 +403,7 @@ def main():
     print(f"n_users / n_obs         : {n_users} / {n_obs}")
     print(f"rmse_pop / rmse_shrunk  : "
           f"{summary['rmse_baseline_pop']:.4f} / "
-          f"{summary['rmse_pilsd_shrunk']:.4f}")
+          f"{summary['rmse_pebs_shrunk']:.4f}")
     print(f"gain_pct                : {gain:+.3f}%  CI [{ci_lo:+.3f}, {ci_hi:+.3f}]")
     print(f"anomalies_fired         : {anomalies}")
     print(f"summary_path            : {summary_path}")
@@ -429,7 +414,7 @@ if __name__ == "__main__":
         main()
     except Exception:
         traceback.print_exc()
-        # G3: ensure summary.json exists for cron's verdict-detection
+        # Ensure summary.json exists even on failure
         sp = OUT_DIR / "summary.json"
         if not sp.exists():
             sp.write_text(json.dumps({

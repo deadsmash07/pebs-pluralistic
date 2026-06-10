@@ -1,28 +1,28 @@
 """Wave C EXP-1: PRewardBench Proposition 1 orthogonality demonstration.
 
-Closes NeurIPS Pass 5 reviewer attack: "RMSE-vs-pair-accuracy gap" — i.e., the
-worry that PILSD's RMSE improvements are won at the cost of pair-accuracy
-degradation. Proposition 1 (paper App. PILSD theorem statement) asserts:
+Addresses the "RMSE-vs-pair-accuracy gap" concern — i.e., the
+worry that PEBS's RMSE improvements are won at the cost of pair-accuracy
+degradation. Proposition 1 (paper App. PEBS theorem statement) asserts:
 
     Any monotone-affine calibrator y_j = alpha_j + beta_j * x with beta_j > 0
     leaves the pairwise ordering of any two scores invariant — i.e.,
         x_a > x_b  <=>  alpha_j + beta_j * x_a > alpha_j + beta_j * x_b
     for all (alpha_j, beta_j) with beta_j > 0.
 
-Therefore PILSD's per-user (alpha_j, beta_j) calibrator is BY CONSTRUCTION
+Therefore PEBS's per-user (alpha_j, beta_j) calibrator is BY CONSTRUCTION
 pair-accuracy-invariant. This script provides the empirical confirmation on
 PRewardBench (Ma et al., arXiv:2604.07343), an OUT-OF-DISTRIBUTION pairwise
-benchmark not seen during PILSD calibrator fitting. The verdict-class
-distinction is binding:
+benchmark not seen during PEBS calibrator fitting. Outcome
+classification:
 
-    ESTABLISHED-PROP1-EMPIRICALLY-VALIDATED  if pair-accuracy delta <= 0.1pp
+    CONFIRMED-PROP1-EMPIRICALLY-VALIDATED  if pair-accuracy delta <= 0.1pp
                                               AND RMSE-to-uniform-target
                                               calibration improves
                                               significantly.
-    MODERATE-PROP1-PARTIAL                    if pair-accuracy matches
+    PARTIAL-PROP1-PARTIAL                    if pair-accuracy matches
                                               within sampling noise but
                                               with caveats.
-    FALSIFIED-PROP1-VIOLATED                  if pair-accuracy changes >0.5pp
+    REJECTED-PROP1-VIOLATED                  if pair-accuracy changes >0.5pp
                                               (would be a MAJOR FINDING:
                                               numerical-precision violation
                                               of monotone-invariance, e.g.,
@@ -37,14 +37,14 @@ Pipeline
    Qwen2.5-7B-Instruct (4-bit nf4) mean-response-log-likelihood — same
    reward proxy used for the PRISM headline (Stiennon 2020; Ouyang 2022).
 3. Compute BASELINE pair-accuracy: P(rm_score(chosen) > rm_score(rejected)).
-4. Apply PRISM-population PILSD calibrator (alpha_pop, beta_pop), recompute
+4. Apply PRISM-population PEBS calibrator (alpha_pop, beta_pop), recompute
    pair-accuracy POST-CALIBRATION.
 5. Apply 16 synthetic per-user calibrators (sampled from PRISM Empirical-Bayes
    posterior tau_alpha=10.756 / tau_beta=5.116 + alpha_pop / beta_pop), one
    assigned per row by hash(question), recompute pair-accuracy.
 6. Report deltas. Bootstrap by-row to attach 95% CIs (B=2000).
 
-Why this design (not the naive "load PILSD checkpoint" approach):
+Why this design (not the naive "load PEBS checkpoint" approach):
     PRewardBench has no per-user `user_id` field exposing rater identity;
     `profile` is a list of past-question dictionaries serving as in-context
     user history rather than a stable user identifier. Therefore:
@@ -57,38 +57,36 @@ Why this design (not the naive "load PILSD checkpoint" approach):
         continuous-target rating — the RMSE-to-uniform-target column is
         a MONOTONE diagnostic (lower = better-spread), NOT a paper claim.
 
-12-gate audit gates (Skill: research-grade-code-audit-pre-launch):
-    G1 math: monotone-affine ordering invariance is a deterministic
+Design notes:
+    - Math: monotone-affine ordering invariance is a deterministic
        property; pair-accuracy delta should be < 1e-12 in float64 for
        any (alpha_j, beta_j) with beta_j > 0. Any non-zero delta arises
        only from float-precision tied-score boundary cases.
-    G2 hypothesis-vs-design: this script tests "does PILSD's affine
+    - Hypothesis: this script tests "does PEBS's affine
        calibrator preserve pair-accuracy on PRewardBench"; the result
-       directly closes the RMSE-vs-pair-accuracy reviewer attack.
-    G3 no silent-bypass: BEFORE / AFTER are computed from independently
+       directly resolves the RMSE-vs-pair-accuracy concern.
+    - No silent-bypass: BEFORE / AFTER are computed from independently
        constructed score arrays (np.array(...).copy()); no shared mutable
        state.
-    G4 eval pipeline integrity: pair-accuracy uses the SAME comparator
+    - Eval pipeline integrity: pair-accuracy uses the SAME comparator
        function for BEFORE / AFTER (np.greater, no rounding).
-    G5 reference-implementation: PRISM scoring matches
-       `scripts/score_prism_utterances.py` mean-LL exactly; PILSD pop
+    - Reference implementation: PRISM scoring matches
+       `scripts/score_prism_utterances.py` mean-LL exactly; PEBS pop
        calibrator (alpha_pop, beta_pop) read from
        `1_Causal_RLHF/results/track1_user_score_mse_shrunk.json`.
-    G6 hyperparameter sanity: nf4 4-bit quantization (PRISM convention);
+    - Hyperparameters: nf4 4-bit quantization (PRISM convention);
        max_prompt_tokens=256, max_response_tokens=256.
-    G7 per-step diagnostics: per-row scoring rate + ETA + score
+    - Diagnostics: per-row scoring rate + ETA + score
        distribution stats logged every 100 rows.
-    G8 reproducibility: torch.manual_seed(42) + np.random.default_rng(20260420)
-       (matches all PRISM h2h scripts); HF_HOME=/workspace/.hf_cache; all
-       commit hashes persisted in output.json.
-    G9 output schema: machine-parseable summary.json with verdict_class
-       (4-class STRICT) + per_user.parquet for downstream analysis.
-    G10 compute envelope: 5660 forward passes (2 responses x 2830 rows)
-       at ~1-2 row/s on H100 nf4-quantized 7B = 50-100 min wall + post-
-       process (~2 min) = ~3h total budget.
-    G11 anti-overfitting: not applicable (no training).
-    G12 honest-disclosure: FALSIFIED-PROP1-VIOLATED is a spotlight-tier
-       honest finding, NOT a paper-killer; verdict-class explicitly
+    - Reproducibility: torch.manual_seed(42) + np.random.default_rng(20260420)
+       (matches all PRISM h2h scripts).
+    - Output schema: machine-parseable summary.json with verdict_class
+       + per_user.parquet for downstream analysis.
+    - Compute envelope: 5660 forward passes (2 responses x 2830 rows)
+       at ~1-2 row/s on an 80GB GPU, nf4-quantized 7B = 50-100 min wall +
+       post-process (~2 min) = ~3h total budget.
+    - REJECTED-PROP1-VIOLATED would itself be a noteworthy
+       honest finding, NOT a paper-killer; the classification explicitly
        enumerates this branch and assigns it the highest scientific
        priority for paper-claim revision.
 
@@ -121,7 +119,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-ROOT = Path(__file__).resolve().parents[3]  # 3_PILSD_Standalone/
+ROOT = Path(__file__).resolve().parents[3]  # 3_PEBS_Standalone/
 T1 = ROOT.parent / "1_Causal_RLHF"
 sys.path.insert(0, str(ROOT / "scripts"))
 from _repo_paths import STANDALONE_RESULTS  # noqa: E402
@@ -140,7 +138,7 @@ N_SYNTHETIC_USERS = 16  # number of synthetic per-row calibrators sampled
 PRECISION_THRESHOLD_PP = 0.1  # 0.1pp = 11.3 rows out of 2830 (any flips)
 FALSIFY_THRESHOLD_PP = 0.5
 
-# PRewardBench config names (verified via WebFetch 2026-05-03 ~01:00 IST)
+# PRewardBench config names (verified against the HF dataset card)
 PRB_CONFIGS = (
     "Art_and_Entertainment",
     "Lifestyle_and_Personal_Development",
@@ -163,9 +161,9 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--smoke-limit", type=int, default=50)
     p.add_argument("--output-dir", default=str(OUT_DIR))
     p.add_argument(
-        "--pilsd-pop-json",
+        "--pebs-pop-json",
         default=str(T1 / "results/track1_user_score_mse_shrunk.json"),
-        help=("Path to PRISM PILSD shrunk-RMSE summary JSON; provides "
+        help=("Path to PRISM PEBS shrunk-RMSE summary JSON; provides "
               "alpha_pop, beta_pop, tau_alpha, tau_beta needed for the "
               "Empirical-Bayes posterior synthetic users."),
     )
@@ -225,17 +223,17 @@ def load_prewardbench(smoke: bool, smoke_limit: int) -> pd.DataFrame:
 
 
 # ============================================================================
-# PILSD calibrators
+# PEBS calibrators
 # ============================================================================
 
 
-def load_pilsd_pop(path: Path) -> dict:
-    """Load PRISM-trained PILSD population calibrator + EB posterior parameters.
+def load_pebs_pop(path: Path) -> dict:
+    """Load PRISM-trained PEBS population calibrator + EB posterior parameters.
 
     Required fields in the source JSON (output of eval_user_score_mse_shrunk.py
     on PRISM):
         eb.tau_alpha_sq, eb.tau_beta_sq      -> EB posterior variances
-        rmse_mean.{pop_slope, pilsd_shrunk}  -> sanity check (pop must be > shrunk)
+        rmse_mean.{pop_slope, pebs_shrunk}  -> sanity check (pop must be > shrunk)
     Plus (from the PRISM scoring artifact):
         pop_alpha, pop_beta                   -> NOT in this JSON, must be
                                                  reconstructed from PRISM data.
@@ -258,7 +256,7 @@ def load_pilsd_pop(path: Path) -> dict:
         "tau_beta_sq": float(eb["tau_beta_sq"]),
         "n_users_prism": int(prism_summary["n_users"]),
         "rmse_pop_prism": float(prism_summary["rmse_mean"]["pop_slope"]),
-        "rmse_shrunk_prism": float(prism_summary["rmse_mean"]["pilsd_shrunk"]),
+        "rmse_shrunk_prism": float(prism_summary["rmse_mean"]["pebs_shrunk"]),
     }
 
 
@@ -342,7 +340,7 @@ def apply_calibrator_per_row(
     profile_hash: np.ndarray,
 ) -> np.ndarray:
     """Apply DIFFERENT (alpha_j, beta_j) per row, where j = profile_hash %
-    len(calibs). This simulates the per-user calibrator regime PILSD
+    len(calibs). This simulates the per-user calibrator regime PEBS
     actually uses on PRISM (where each user gets a distinct calibrator).
     """
     s_out = np.empty_like(s, dtype=np.float64)
@@ -380,7 +378,7 @@ def cluster_bootstrap_pair_acc_delta(
 
 
 # ============================================================================
-# Verdict assignment (4-class STRICT per Skill: honest-disclosure)
+# Outcome assignment
 # ============================================================================
 
 
@@ -391,10 +389,10 @@ def assign_verdict_class(
     abs_delta_pp = max(abs(delta_global_pp), abs(delta_per_row_pp))
     rmse_improves = rmse_pop_after < rmse_pop_before
     if abs_delta_pp <= PRECISION_THRESHOLD_PP and rmse_improves:
-        return "ESTABLISHED-PROP1-EMPIRICALLY-VALIDATED"
+        return "CONFIRMED-PROP1-EMPIRICALLY-VALIDATED"
     if abs_delta_pp <= FALSIFY_THRESHOLD_PP:
-        return "MODERATE-PROP1-PARTIAL"
-    return "FALSIFIED-PROP1-VIOLATED"
+        return "PARTIAL-PROP1-PARTIAL"
+    return "REJECTED-PROP1-VIOLATED"
 
 
 # ============================================================================
@@ -412,16 +410,16 @@ def main():
     print(f"[output-dir] {out_dir}")
 
     # ------------------------------------------------------------------
-    # G5: Load PRISM PILSD calibrator (alpha_pop, beta_pop, EB posterior)
+    # Load PRISM PEBS calibrator (alpha_pop, beta_pop, EB posterior)
     # ------------------------------------------------------------------
-    pilsd_meta = load_pilsd_pop(Path(args.pilsd_pop_json))
+    pebs_meta = load_pebs_pop(Path(args.pebs_pop_json))
     alpha_pop, beta_pop = fit_prism_pop_calib()
-    print(f"[PILSD] alpha_pop={alpha_pop:.4f}  beta_pop={beta_pop:.4f}  "
-          f"tau_alpha={pilsd_meta['tau_alpha']:.4f}  "
-          f"tau_beta={pilsd_meta['tau_beta']:.4f}")
-    print(f"[PILSD] n_users_prism={pilsd_meta['n_users_prism']}  "
-          f"rmse_pop={pilsd_meta['rmse_pop_prism']:.3f}  "
-          f"rmse_shrunk={pilsd_meta['rmse_shrunk_prism']:.3f}")
+    print(f"[PEBS] alpha_pop={alpha_pop:.4f}  beta_pop={beta_pop:.4f}  "
+          f"tau_alpha={pebs_meta['tau_alpha']:.4f}  "
+          f"tau_beta={pebs_meta['tau_beta']:.4f}")
+    print(f"[PEBS] n_users_prism={pebs_meta['n_users_prism']}  "
+          f"rmse_pop={pebs_meta['rmse_pop_prism']:.3f}  "
+          f"rmse_shrunk={pebs_meta['rmse_shrunk_prism']:.3f}")
 
     # ------------------------------------------------------------------
     # Load PRewardBench
@@ -519,7 +517,7 @@ def main():
     print(f"[score] DONE: {len(df)} valid rows in {elapsed_score/60:.1f} min")
 
     # ------------------------------------------------------------------
-    # Apply PILSD population calibrator (alpha_pop, beta_pop)
+    # Apply PEBS population calibrator (alpha_pop, beta_pop)
     # ------------------------------------------------------------------
     s_c_pop = apply_calibrator_global(score_chosen, alpha_pop, beta_pop)
     s_r_pop = apply_calibrator_global(score_rejected, alpha_pop, beta_pop)
@@ -530,7 +528,7 @@ def main():
     rng = np.random.default_rng(RNG_BOOT)
     synthetic_calibs = sample_synthetic_users(
         args.n_synthetic_users, alpha_pop, beta_pop,
-        pilsd_meta["tau_alpha"], pilsd_meta["tau_beta"], rng,
+        pebs_meta["tau_alpha"], pebs_meta["tau_beta"], rng,
     )
     profile_hash = df["profile_hash"].to_numpy()
     s_c_per = apply_calibrator_per_row(score_chosen, synthetic_calibs,
@@ -595,14 +593,14 @@ def main():
         "n_categories": int(df["category"].nunique()),
         "categories": sorted(df["category"].unique().tolist()),
         "model_id": args.model_id,
-        "pilsd_pop": {
+        "pebs_pop": {
             "alpha_pop": alpha_pop,
             "beta_pop": beta_pop,
-            "tau_alpha": pilsd_meta["tau_alpha"],
-            "tau_beta": pilsd_meta["tau_beta"],
-            "n_users_prism": pilsd_meta["n_users_prism"],
-            "rmse_pop_prism": pilsd_meta["rmse_pop_prism"],
-            "rmse_shrunk_prism": pilsd_meta["rmse_shrunk_prism"],
+            "tau_alpha": pebs_meta["tau_alpha"],
+            "tau_beta": pebs_meta["tau_beta"],
+            "n_users_prism": pebs_meta["n_users_prism"],
+            "rmse_pop_prism": pebs_meta["rmse_pop_prism"],
+            "rmse_shrunk_prism": pebs_meta["rmse_shrunk_prism"],
         },
         "synthetic_users": {
             "n_synthetic_users": int(args.n_synthetic_users),
@@ -634,13 +632,6 @@ def main():
         "rng_boot": int(RNG_BOOT),
         "n_boot": int(args.n_boot),
         "args": vars(args),
-        "skill_citations": [
-            "Skill: research-grade-code-audit-pre-launch v1 G1-G12",
-            "Skill: honest-disclosure §6.3 SCOPE-not-RETRACT (4-class STRICT)",
-            "Skill: post-experiment-discipline-3-track Step 5+7",
-            "Skill: launch-runpod-h100-job",
-            "Skill: gpu-artifact-sync",
-        ],
     }
 
     # Anomaly branches (empty list for normal Prop 1 confirmation)
@@ -677,7 +668,7 @@ if __name__ == "__main__":
         main()
     except Exception:
         traceback.print_exc()
-        # Emit minimal failure summary to keep cron's verdict-detection happy
+        # Emit minimal failure summary even on error
         fail = {
             "experiment_id": "WaveC_EXP1_PRewardBench_Prop1_demo",
             "verdict_class": "RUNTIME-ERROR",

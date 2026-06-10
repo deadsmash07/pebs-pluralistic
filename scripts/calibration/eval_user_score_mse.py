@@ -1,7 +1,7 @@
-"""Within-user held-out MSE — the proper metric for PILSD linear calibration.
+"""Within-user held-out MSE — the proper metric for PEBS linear calibration.
 
 Last iteration's finding: pair accuracy is MONOTONE-INVARIANT within user, so
-arm C (PILSD-corrected) can't improve over arm B on pair ranking by
+arm C (PEBS-corrected) can't improve over arm B on pair ranking by
 construction. The metric doesn't test what linear calibration does.
 
 This script tests what it DOES: predict a user's held-out score magnitude
@@ -9,12 +9,12 @@ from the RM score via per-user α_j, β_j. Compare three predictors:
 
   No-calib (baseline 1): user_score_hat = global β_0 + global β_1 · rm_score
   Pop-slope (baseline 2): same global slope + global intercept, applied to everyone
-  PILSD (ours): user_score_hat = β̂_j + α̂_j · rm_score  (per-user fit)
+  PEBS (ours): user_score_hat = β̂_j + α̂_j · rm_score  (per-user fit)
 
 Metric: RMSE on within-user held-out utterances via k-fold CV. RMSE IS
 sensitive to scale calibration (pair accuracy is not).
 
-Paper claim if PILSD wins: "Per-user linear calibration reduces held-out
+Paper claim if PEBS wins: "Per-user linear calibration reduces held-out
 user-score prediction RMSE by X% over a pooled-slope baseline on PRISM."
 
 References:
@@ -101,7 +101,7 @@ def main():
 
         fold_no_calib_sq = []     # predict global mean of y_train each fold
         fold_pop_slope_sq = []    # predict global_int + global_slope · x_test
-        fold_pilsd_sq = []        # predict user-own OLS(α_j, β_j) fit on train
+        fold_pebs_sq = []        # predict user-own OLS(α_j, β_j) fit on train
 
         for train_idx, test_idx in folds:
             x_tr, y_tr = x[train_idx], y[train_idx]
@@ -116,19 +116,19 @@ def main():
             y_hat_ps = global_int + global_slope * x_te
             fold_pop_slope_sq.extend(((y_hat_ps - y_te) ** 2).tolist())
 
-            # PILSD: per-user (α, β) fit on train fold only
+            # PEBS: per-user (α, β) fit on train fold only
             alpha_j, beta_j = ols_intercept_slope(x_tr, y_tr)
-            y_hat_pilsd = alpha_j + beta_j * x_te
+            y_hat_pebs = alpha_j + beta_j * x_te
             # NOTE: ols_intercept_slope returns (intercept, slope), so this is β̂_j + α̂_j·x
             # We already used the same variable names consistently.
-            fold_pilsd_sq.extend(((y_hat_pilsd - y_te) ** 2).tolist())
+            fold_pebs_sq.extend(((y_hat_pebs - y_te) ** 2).tolist())
 
         per_user_rmse.append({
             "user_id": uid,
             "n": n,
             "rmse_no_calib": float(np.sqrt(np.mean(fold_no_calib_sq))),
             "rmse_pop_slope": float(np.sqrt(np.mean(fold_pop_slope_sq))),
-            "rmse_pilsd": float(np.sqrt(np.mean(fold_pilsd_sq))),
+            "rmse_pebs": float(np.sqrt(np.mean(fold_pebs_sq))),
         })
         per_user_n.append(n)
 
@@ -138,7 +138,7 @@ def main():
     print(f"  mean n/user among kept: {np.mean(per_user_n):.1f}")
 
     # Summary stats per arm
-    for arm in ["rmse_no_calib", "rmse_pop_slope", "rmse_pilsd"]:
+    for arm in ["rmse_no_calib", "rmse_pop_slope", "rmse_pebs"]:
         vals = per_user_df[arm]
         print(f"  {arm}: mean={vals.mean():.3f}  median={vals.median():.3f}  "
               f"p25={vals.quantile(0.25):.3f}  p75={vals.quantile(0.75):.3f}")
@@ -169,20 +169,20 @@ def main():
                         "median": float(per_user_df.rmse_no_calib.median())},
             "pop_slope": {"mean": float(per_user_df.rmse_pop_slope.mean()),
                          "median": float(per_user_df.rmse_pop_slope.median())},
-            "pilsd": {"mean": float(per_user_df.rmse_pilsd.mean()),
-                      "median": float(per_user_df.rmse_pilsd.median())},
+            "pebs": {"mean": float(per_user_df.rmse_pebs.mean()),
+                      "median": float(per_user_df.rmse_pebs.median())},
         },
         "wilcoxon_tests": {
             "pop_slope_vs_no_calib": paired("rmse_pop_slope", "rmse_no_calib"),
-            "pilsd_vs_no_calib": paired("rmse_pilsd", "rmse_no_calib"),
-            "pilsd_vs_pop_slope": paired("rmse_pilsd", "rmse_pop_slope"),
+            "pebs_vs_no_calib": paired("rmse_pebs", "rmse_no_calib"),
+            "pebs_vs_pop_slope": paired("rmse_pebs", "rmse_pop_slope"),
         },
     }
 
-    # Relative improvement (PILSD vs pop_slope baseline)
-    rel = 100.0 * (per_user_df.rmse_pop_slope.mean() - per_user_df.rmse_pilsd.mean()) \
+    # Relative improvement (PEBS vs pop_slope baseline)
+    rel = 100.0 * (per_user_df.rmse_pop_slope.mean() - per_user_df.rmse_pebs.mean()) \
           / max(per_user_df.rmse_pop_slope.mean(), 1e-9)
-    out["pilsd_vs_pop_slope_relative_improvement_pct"] = float(rel)
+    out["pebs_vs_pop_slope_relative_improvement_pct"] = float(rel)
 
     # Per-user-bootstrap CI for the improvement: resample users, recompute mean
     n_boot = 1000
@@ -192,9 +192,9 @@ def main():
     for _ in range(n_boot):
         sub = rng_ci.choice(users, size=len(users), replace=True)
         a = per_user_df.iloc[sub].rmse_pop_slope.mean()
-        b = per_user_df.iloc[sub].rmse_pilsd.mean()
+        b = per_user_df.iloc[sub].rmse_pebs.mean()
         boot_rel.append(100.0 * (a - b) / max(a, 1e-9))
-    out["pilsd_vs_pop_slope_rel_improvement_95CI"] = [
+    out["pebs_vs_pop_slope_rel_improvement_95CI"] = [
         float(np.percentile(boot_rel, 2.5)),
         float(np.percentile(boot_rel, 97.5)),
     ]
@@ -208,15 +208,15 @@ def main():
 
     # Verdict
     print(f"\n=== Verdict ===")
-    print(f"  PILSD vs pop-slope relative improvement: {rel:.2f}%")
-    print(f"  95% CI: [{out['pilsd_vs_pop_slope_rel_improvement_95CI'][0]:.2f}%, "
-          f"{out['pilsd_vs_pop_slope_rel_improvement_95CI'][1]:.2f}%]")
-    p = out["wilcoxon_tests"]["pilsd_vs_pop_slope"]["wilcoxon_p"]
-    print(f"  Wilcoxon paired p (pilsd < pop_slope): {p:.2e}")
+    print(f"  PEBS vs pop-slope relative improvement: {rel:.2f}%")
+    print(f"  95% CI: [{out['pebs_vs_pop_slope_rel_improvement_95CI'][0]:.2f}%, "
+          f"{out['pebs_vs_pop_slope_rel_improvement_95CI'][1]:.2f}%]")
+    p = out["wilcoxon_tests"]["pebs_vs_pop_slope"]["wilcoxon_p"]
+    print(f"  Wilcoxon paired p (pebs < pop_slope): {p:.2e}")
     if rel > 0 and p < 0.05:
-        print("  ✓ PILSD significantly improves user-score prediction vs global calibration")
+        print("  ✓ PEBS significantly improves user-score prediction vs global calibration")
     else:
-        print("  ✗ PILSD does NOT improve RMSE over global calibration on this test")
+        print("  ✗ PEBS does NOT improve RMSE over global calibration on this test")
 
 
 if __name__ == "__main__":

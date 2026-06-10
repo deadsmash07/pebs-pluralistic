@@ -26,7 +26,7 @@ Protocol (matches eval_user_score_mse_quadratic.py)
    via ordinary least squares, with heteroskedasticity-robust (HC1)
    standard errors for the Wald t-test on α_j (the quadratic coef).
 4. Also run k=5 CV within-user to report held-out RMSE per user for
-   three arms (pop linear, PILSD linear OLS, PILSD quadratic OLS).
+   three arms (pop linear, PEBS linear OLS, PEBS quadratic OLS).
 5. Save per-user parquet + summary.json under
    `results/track1_quadratic_calibrator/`.
 
@@ -108,7 +108,7 @@ def ols_quadratic_hc1(x_raw: np.ndarray, y: np.ndarray, sq_mean: float):
     return {
         "gamma_j": float(beta[0]),   # intercept  (naming per theorem: r' = alpha + beta*r + gamma*r^2; but per-paper convention intercept=γ, linear=β, quad=α)
         "beta_j": float(beta[1]),
-        "alpha_j": float(beta[2]),   # quadratic (per-paper convention matches quadratic calibrator memo)
+        "alpha_j": float(beta[2]),   # quadratic (per-paper convention)
         "se_intercept_hc1": float(se[0]),
         "se_linear_hc1":    float(se[1]),
         "se_quadratic_hc1": float(se[2]),
@@ -278,8 +278,8 @@ def main():
             "n": n,
             "rmse_pop_linear":    float(np.sqrt(np.mean(sq_pop_lin))),
             "rmse_pop_quadratic": float(np.sqrt(np.mean(sq_pop_quad))),
-            "rmse_pilsd_linear_ols":    float(np.sqrt(np.mean(sq_lin))),
-            "rmse_pilsd_quadratic_ols": float(np.sqrt(np.mean(sq_quad))),
+            "rmse_pebs_linear_ols":    float(np.sqrt(np.mean(sq_lin))),
+            "rmse_pebs_quadratic_ols": float(np.sqrt(np.mean(sq_quad))),
         })
     cv_df = pd.DataFrame(per_user_cv)
     t_cv = time.time() - t0
@@ -300,10 +300,10 @@ def main():
         print(f"  {c:<32} mean={agg_mean[c]:.4f}  median={agg_median[c]:.4f}")
 
     # ---------- Paired Wilcoxon quadratic_ols vs linear_ols ----------
-    w = stats.wilcoxon(cv_df["rmse_pilsd_quadratic_ols"].to_numpy(),
-                       cv_df["rmse_pilsd_linear_ols"].to_numpy(),
+    w = stats.wilcoxon(cv_df["rmse_pebs_quadratic_ols"].to_numpy(),
+                       cv_df["rmse_pebs_linear_ols"].to_numpy(),
                        alternative="two-sided")
-    d_pairs = (cv_df["rmse_pilsd_quadratic_ols"] - cv_df["rmse_pilsd_linear_ols"]).to_numpy()
+    d_pairs = (cv_df["rmse_pebs_quadratic_ols"] - cv_df["rmse_pebs_linear_ols"]).to_numpy()
     quad_vs_lin_ols = {
         "mean_delta_quad_minus_lin": float(np.mean(d_pairs)),
         "median_delta":              float(np.median(d_pairs)),
@@ -317,8 +317,8 @@ def main():
     # ---------- Cluster bootstrap on mean(RMSE_lin - RMSE_quad) ----------
     rng_b = np.random.default_rng(args.seed + 1)
     n_u = len(cv_df)
-    lin = cv_df["rmse_pilsd_linear_ols"].to_numpy()
-    qd = cv_df["rmse_pilsd_quadratic_ols"].to_numpy()
+    lin = cv_df["rmse_pebs_linear_ols"].to_numpy()
+    qd = cv_df["rmse_pebs_quadratic_ols"].to_numpy()
     deltas = []
     for _ in range(args.n_boot):
         sub = rng_b.choice(n_u, size=n_u, replace=True)

@@ -1,6 +1,6 @@
-"""Compute Cohen's d and held-out Bradley-Terry log-likelihood for PILSD vs pop-slope.
+"""Compute Cohen's d and held-out Bradley-Terry log-likelihood for PEBS vs pop-slope.
 
-Addresses reviewer W4 on the paper's RMSE headline:
+Addresses effect-size objections to the paper's RMSE headline:
   (i) "RMSE drop of 2.19 points on a scale with SD~24 is small"  →  Cohen's d
   (ii) "Wilcoxon p<1e-108 reflects N=1394 not effect size"        →  paired d + CI
   (iii) "RMSE is monotone-invariant; use BT log-likelihood"       →  BT NLL eval
@@ -11,7 +11,7 @@ Inputs (all REAL PRISM):
                                              score_user, if_chosen, rm_score, ...)
   results/track1_user_score_mse_shrunk.parquet
                                           — 1,394 × (rmse_{no_calib, pop_slope,
-                                             pilsd_ols, pilsd_shrunk}) for paired d
+                                             pebs_ols, pebs_shrunk}) for paired d
 
 Outputs:
   results/cohen_d_bt_ll.json              — machine-readable numerical results
@@ -19,18 +19,18 @@ Outputs:
 
 Method:
   Cohen's d (Task 1):
-    - Paired d = mean(Δ) / sd(Δ) on (pop_slope_RMSE - pilsd_shrunk_RMSE) per user
-    - Pooled d_s = mean(Δ) / sqrt((sd_pop² + sd_pilsd²)/2) — standard two-sample
+    - Paired d = mean(Δ) / sd(Δ) on (pop_slope_RMSE - pebs_shrunk_RMSE) per user
+    - Pooled d_s = mean(Δ) / sqrt((sd_pop² + sd_pebs²)/2) — standard two-sample
     - 95% CI via 2000-rep cluster bootstrap on user_id
     - Normalized RMSE = RMSE / sd(score_user)
 
   BT log-likelihood (Task 2):
     For per-user 5-fold CV (SAME seed=42 as eval_user_score_mse_shrunk.py):
-      - Fit (α_j, β_j) via PILSD shrunk on TRAIN fold utterances
+      - Fit (α_j, β_j) via PEBS shrunk on TRAIN fold utterances
       - Fit (α_pop, β_pop) via global OLS on FULL data (as baseline does)
       - For each pair (chosen, rejected) in TEST fold (same user_id, interaction_id,
         turn; if_chosen=True vs if_chosen=False):
-          NLL_pilsd = -log sigmoid(β_j · (rm_chosen - rm_rejected))
+          NLL_pebs = -log sigmoid(β_j · (rm_chosen - rm_rejected))
           NLL_pop   = -log sigmoid(β_pop · (rm_chosen - rm_rejected))
       - Aggregate mean NLL across all held-out pairs
       - Paired Δ NLL per pair + Wilcoxon
@@ -99,18 +99,18 @@ def ols_with_V(x: np.ndarray, y: np.ndarray):
 
 # ---------- Task 1: Cohen's d on per-user RMSE ----------
 
-def cohens_d_paired_and_pooled(pop_rmse: np.ndarray, pilsd_rmse: np.ndarray):
-    """Return (paired d, pooled d_s). Convention: positive d = PILSD better."""
-    diff = pop_rmse - pilsd_rmse  # positive means PILSD lower RMSE (better)
+def cohens_d_paired_and_pooled(pop_rmse: np.ndarray, pebs_rmse: np.ndarray):
+    """Return (paired d, pooled d_s). Convention: positive d = PEBS better."""
+    diff = pop_rmse - pebs_rmse  # positive means PEBS lower RMSE (better)
     d_paired = float(diff.mean() / diff.std(ddof=1))
     sd_pop = pop_rmse.std(ddof=1)
-    sd_pilsd = pilsd_rmse.std(ddof=1)
-    pooled_sd = float(np.sqrt((sd_pop ** 2 + sd_pilsd ** 2) / 2))
+    sd_pebs = pebs_rmse.std(ddof=1)
+    pooled_sd = float(np.sqrt((sd_pop ** 2 + sd_pebs ** 2) / 2))
     d_pooled = float(diff.mean() / pooled_sd)
     return d_paired, d_pooled, pooled_sd
 
 
-def cluster_bootstrap_d(pop_rmse: np.ndarray, pilsd_rmse: np.ndarray,
+def cluster_bootstrap_d(pop_rmse: np.ndarray, pebs_rmse: np.ndarray,
                         user_ids: np.ndarray, n_boot: int, rng: np.random.Generator):
     """Cluster bootstrap by user_id. Since rows are per-user (1 per user),
     this degenerates to a standard non-parametric bootstrap over the 1394 users."""
@@ -122,7 +122,7 @@ def cluster_bootstrap_d(pop_rmse: np.ndarray, pilsd_rmse: np.ndarray,
     for b in range(n_boot):
         pick = rng.choice(unique_users, size=n_u, replace=True)
         idx = np.array([user_to_idx[u] for u in pick])
-        d_p, d_s, _ = cohens_d_paired_and_pooled(pop_rmse[idx], pilsd_rmse[idx])
+        d_p, d_s, _ = cohens_d_paired_and_pooled(pop_rmse[idx], pebs_rmse[idx])
         d_paired_boots[b] = d_p
         d_pooled_boots[b] = d_s
     return d_paired_boots, d_pooled_boots
@@ -183,7 +183,7 @@ def compute_bt_per_fold(df: pd.DataFrame, pairs_df: pd.DataFrame,
       - For each fold: fit calibrator on TRAIN utterances
       - For each pair where BOTH utterances are in the TEST fold: compute BT NLL
     Returns per-pair dataframe with columns:
-      [user_id, chosen_utt, rejected_utt, fold, nll_pop, nll_pilsd,
+      [user_id, chosen_utt, rejected_utt, fold, nll_pop, nll_pebs,
        Δ_rm, β_j, α_j]
     """
     # Index df by (user_id, utterance_id) for O(1) fold lookup
@@ -247,10 +247,10 @@ def compute_bt_per_fold(df: pd.DataFrame, pairs_df: pd.DataFrame,
         a_s, b_s = per_user_fold_ab[(uid, matching_fold)]
         delta_rm = float(p.chosen_rm - p.rejected_rm)
         # BT log-likelihood (positive score = chosen preferred)
-        z_pilsd = b_s * delta_rm
+        z_pebs = b_s * delta_rm
         z_pop = pop_beta * delta_rm
         # log sigmoid is numerically stable
-        nll_pilsd = -float(log_expit(z_pilsd))
+        nll_pebs = -float(log_expit(z_pebs))
         nll_pop = -float(log_expit(z_pop))
         out_rows.append({
             "user_id": uid,
@@ -258,9 +258,9 @@ def compute_bt_per_fold(df: pd.DataFrame, pairs_df: pd.DataFrame,
             "rejected_utt": r_utt,
             "fold": matching_fold,
             "delta_rm": delta_rm,
-            "beta_pilsd": b_s,
-            "alpha_pilsd": a_s,
-            "nll_pilsd": nll_pilsd,
+            "beta_pebs": b_s,
+            "alpha_pebs": a_s,
+            "nll_pebs": nll_pebs,
             "nll_pop": nll_pop,
         })
     return pd.DataFrame(out_rows)
@@ -286,22 +286,22 @@ def main():
     # ============================================================
     print(f"\n[t={time.time()-t0:.1f}s] === Task 1: Cohen's d ===")
     pop = rmse_df.rmse_pop_slope.to_numpy()
-    pilsd = rmse_df.rmse_pilsd_shrunk.to_numpy()
-    pilsd_ols_only = rmse_df.rmse_pilsd_ols.to_numpy()
+    pebs = rmse_df.rmse_pebs_shrunk.to_numpy()
+    pebs_ols_only = rmse_df.rmse_pebs_ols.to_numpy()
     user_ids_rmse = rmse_df.user_id.to_numpy()
 
-    d_paired, d_pooled, pooled_sd = cohens_d_paired_and_pooled(pop, pilsd)
-    d_paired_ols, d_pooled_ols, _ = cohens_d_paired_and_pooled(pop, pilsd_ols_only)
-    print(f"  Paired d (pop vs pilsd_shrunk) = {d_paired:.4f}  [{interpret_d(d_paired)}]")
-    print(f"  Pooled d_s (pop vs pilsd_shrunk) = {d_pooled:.4f}  [{interpret_d(d_pooled)}]")
-    print(f"  (aux) Paired d (pop vs pilsd_ols) = {d_paired_ols:.4f}")
+    d_paired, d_pooled, pooled_sd = cohens_d_paired_and_pooled(pop, pebs)
+    d_paired_ols, d_pooled_ols, _ = cohens_d_paired_and_pooled(pop, pebs_ols_only)
+    print(f"  Paired d (pop vs pebs_shrunk) = {d_paired:.4f}  [{interpret_d(d_paired)}]")
+    print(f"  Pooled d_s (pop vs pebs_shrunk) = {d_pooled:.4f}  [{interpret_d(d_pooled)}]")
+    print(f"  (aux) Paired d (pop vs pebs_ols) = {d_paired_ols:.4f}")
 
     # Bootstrap CI
     rng = np.random.default_rng(args.seed)
     print(f"  Running {args.n_boot} cluster bootstrap reps ...")
     t_boot = time.time()
     d_pair_boot, d_pool_boot = cluster_bootstrap_d(
-        pop, pilsd, user_ids_rmse, args.n_boot, rng
+        pop, pebs, user_ids_rmse, args.n_boot, rng
     )
     print(f"  Bootstrap time: {time.time() - t_boot:.1f}s")
     ci_d_paired = (float(np.percentile(d_pair_boot, 2.5)),
@@ -313,12 +313,12 @@ def main():
 
     # Normalized RMSE
     nrmse_pop = float(pop.mean() / sd_score_user)
-    nrmse_pilsd = float(pilsd.mean() / sd_score_user)
-    nrmse_ols = float(pilsd_ols_only.mean() / sd_score_user)
+    nrmse_pebs = float(pebs.mean() / sd_score_user)
+    nrmse_ols = float(pebs_ols_only.mean() / sd_score_user)
     nrmse_pop_med = float(np.median(pop) / sd_score_user)
-    nrmse_pilsd_med = float(np.median(pilsd) / sd_score_user)
-    print(f"  NRMSE (mean/SD):  pop_slope = {nrmse_pop:.4f}, pilsd_shrunk = {nrmse_pilsd:.4f}")
-    print(f"  Absolute drop in SD units = {(pop.mean() - pilsd.mean()) / sd_score_user:.4f}")
+    nrmse_pebs_med = float(np.median(pebs) / sd_score_user)
+    print(f"  NRMSE (mean/SD):  pop_slope = {nrmse_pop:.4f}, pebs_shrunk = {nrmse_pebs:.4f}")
+    print(f"  Absolute drop in SD units = {(pop.mean() - pebs.mean()) / sd_score_user:.4f}")
 
     # ============================================================
     # TASK 2: BT log-likelihood
@@ -367,34 +367,34 @@ def main():
         raise RuntimeError("No held-out pairs — something is wrong with pairing logic")
 
     mean_nll_pop = float(bt_df.nll_pop.mean())
-    mean_nll_pilsd = float(bt_df.nll_pilsd.mean())
-    delta_nll = bt_df.nll_pop - bt_df.nll_pilsd  # positive = PILSD better
+    mean_nll_pebs = float(bt_df.nll_pebs.mean())
+    delta_nll = bt_df.nll_pop - bt_df.nll_pebs  # positive = PEBS better
     mean_delta = float(delta_nll.mean())
-    frac_pilsd_wins = float((bt_df.nll_pilsd < bt_df.nll_pop).mean())
-    frac_pop_wins = float((bt_df.nll_pilsd > bt_df.nll_pop).mean())
-    frac_tied = float((bt_df.nll_pilsd == bt_df.nll_pop).mean())
+    frac_pebs_wins = float((bt_df.nll_pebs < bt_df.nll_pop).mean())
+    frac_pop_wins = float((bt_df.nll_pebs > bt_df.nll_pop).mean())
+    frac_tied = float((bt_df.nll_pebs == bt_df.nll_pop).mean())
 
-    print(f"  mean NLL: pop = {mean_nll_pop:.6f}  pilsd = {mean_nll_pilsd:.6f}")
-    print(f"  mean Δ NLL (pop - pilsd) = {mean_delta:+.6f}")
-    print(f"  frac pairs where PILSD has lower NLL = {frac_pilsd_wins:.3%}")
+    print(f"  mean NLL: pop = {mean_nll_pop:.6f}  pebs = {mean_nll_pebs:.6f}")
+    print(f"  mean Δ NLL (pop - pebs) = {mean_delta:+.6f}")
+    print(f"  frac pairs where PEBS has lower NLL = {frac_pebs_wins:.3%}")
 
     # Pair-accuracy (argmax sign agreement) — sanity check (should be identical for β_j, β_pop > 0
     # because sign(β · Δrm) = sign(Δrm) as long as β > 0; this breaks if any β_j < 0)
-    signs_pop = np.sign(bt_df.beta_pilsd * 0 + pop_beta) * np.sign(bt_df.delta_rm)
-    signs_pilsd = np.sign(bt_df.beta_pilsd) * np.sign(bt_df.delta_rm)
+    signs_pop = np.sign(bt_df.beta_pebs * 0 + pop_beta) * np.sign(bt_df.delta_rm)
+    signs_pebs = np.sign(bt_df.beta_pebs) * np.sign(bt_df.delta_rm)
     pair_acc_pop = float((signs_pop > 0).mean())
-    pair_acc_pilsd = float((signs_pilsd > 0).mean())
-    print(f"  pair accuracy: pop = {pair_acc_pop:.4f}  pilsd = {pair_acc_pilsd:.4f}")
+    pair_acc_pebs = float((signs_pebs > 0).mean())
+    print(f"  pair accuracy: pop = {pair_acc_pop:.4f}  pebs = {pair_acc_pebs:.4f}")
 
     # Wilcoxon signed-rank on per-pair Δ NLL
     w = stats.wilcoxon(delta_nll.to_numpy(), alternative="two-sided")
     print(f"  Wilcoxon signed-rank p = {w.pvalue:.3e}  (n pairs = {len(bt_df)})")
 
     # Paired t-test (more powerful when mean is the right statistic)
-    tt = stats.ttest_rel(bt_df.nll_pop, bt_df.nll_pilsd)
+    tt = stats.ttest_rel(bt_df.nll_pop, bt_df.nll_pebs)
     print(f"  Paired t p = {tt.pvalue:.3e}  (t = {tt.statistic:.3f})")
 
-    # Sign test (how often does PILSD win — binomial)
+    # Sign test (how often does PEBS win — binomial)
     n_pos = int((delta_nll > 0).sum())
     n_neg = int((delta_nll < 0).sum())
     sign_p = float(stats.binomtest(n_pos, n_pos + n_neg, 0.5, alternative="two-sided").pvalue)
@@ -451,14 +451,14 @@ def main():
     # Per-user BT NLL (mean over pairs within each user)
     per_user_nll = bt_df.groupby("user_id").agg(
         pop_nll_mean=("nll_pop", "mean"),
-        pilsd_nll_mean=("nll_pilsd", "mean"),
+        pebs_nll_mean=("nll_pebs", "mean"),
         n_pairs=("nll_pop", "size"),
     ).reset_index()
-    pu_delta = per_user_nll.pop_nll_mean - per_user_nll.pilsd_nll_mean
+    pu_delta = per_user_nll.pop_nll_mean - per_user_nll.pebs_nll_mean
     pu_d_paired = float(pu_delta.mean() / pu_delta.std(ddof=1))
     pu_frac_wins = float((pu_delta > 0).mean())
     pu_wilcoxon = stats.wilcoxon(pu_delta.to_numpy(), alternative="two-sided").pvalue
-    print(f"  per-user-level: d_paired = {pu_d_paired:.4f}  frac users where PILSD wins = {pu_frac_wins:.3%}  Wilcoxon p = {pu_wilcoxon:.3e}")
+    print(f"  per-user-level: d_paired = {pu_d_paired:.4f}  frac users where PEBS wins = {pu_frac_wins:.3%}  Wilcoxon p = {pu_wilcoxon:.3e}")
 
     # ============================================================
     # Assemble results
@@ -498,23 +498,23 @@ def main():
             "paired_d_interpretation": interpret_d(d_paired),
             "pooled_d_interpretation": interpret_d(d_pooled),
             "rmse_pop_mean": float(pop.mean()),
-            "rmse_pilsd_shrunk_mean": float(pilsd.mean()),
-            "rmse_pilsd_ols_mean": float(pilsd_ols_only.mean()),
-            "rmse_diff_mean_points": float(pop.mean() - pilsd.mean()),
+            "rmse_pebs_shrunk_mean": float(pebs.mean()),
+            "rmse_pebs_ols_mean": float(pebs_ols_only.mean()),
+            "rmse_diff_mean_points": float(pop.mean() - pebs.mean()),
             "pooled_sd_rmse": pooled_sd,
         },
         "task1_normalized_rmse": {
             "sd_score_user": sd_score_user,
             "nrmse_pop_slope_mean": nrmse_pop,
-            "nrmse_pilsd_shrunk_mean": nrmse_pilsd,
-            "nrmse_pilsd_ols_mean": nrmse_ols,
+            "nrmse_pebs_shrunk_mean": nrmse_pebs,
+            "nrmse_pebs_ols_mean": nrmse_ols,
             "nrmse_pop_slope_median": nrmse_pop_med,
-            "nrmse_pilsd_shrunk_median": nrmse_pilsd_med,
-            "nrmse_absolute_drop_in_sd_units": float((pop.mean() - pilsd.mean()) / sd_score_user),
+            "nrmse_pebs_shrunk_median": nrmse_pebs_med,
+            "nrmse_absolute_drop_in_sd_units": float((pop.mean() - pebs.mean()) / sd_score_user),
         },
         "task2_bt_log_likelihood": {
             "mean_nll_pop": mean_nll_pop,
-            "mean_nll_pilsd_shrunk": mean_nll_pilsd,
+            "mean_nll_pebs_shrunk": mean_nll_pebs,
             "mean_delta_nll_pair_level": mean_delta,
             "median_delta_nll_pair_level": median_delta,
             "mean_delta_nll_pair_level_ci95": list(ci_delta),
@@ -525,14 +525,14 @@ def main():
             "sign_test_p": sign_p,
             "n_pos_vs_neg": [n_pos, n_neg],
             "n_pairs": int(len(bt_df)),
-            "frac_pairs_pilsd_wins": frac_pilsd_wins,
+            "frac_pairs_pebs_wins": frac_pebs_wins,
             "frac_pairs_pop_wins": frac_pop_wins,
             "frac_pairs_tied": frac_tied,
             "paired_d_delta_nll": d_nll_paired,
             "pair_accuracy_pop": pair_acc_pop,
-            "pair_accuracy_pilsd_shrunk": pair_acc_pilsd,
+            "pair_accuracy_pebs_shrunk": pair_acc_pebs,
             "per_user_paired_d_mean_nll": pu_d_paired,
-            "per_user_frac_users_pilsd_wins": pu_frac_wins,
+            "per_user_frac_users_pebs_wins": pu_frac_wins,
             "per_user_wilcoxon_p": float(pu_wilcoxon),
             "delta_nll_quantiles": dq,
             "tail_analysis": {
@@ -565,7 +565,7 @@ def build_report(r: dict) -> str:
     d_s = t1["pooled_d_shrunk_vs_pop"]
     ci_p = t1["paired_d_shrunk_vs_pop_ci95"]
     ci_s = t1["pooled_d_shrunk_vs_pop_ci95"]
-    md = f"""# Cohen's d and held-out Bradley-Terry log-likelihood — PILSD vs pop-slope
+    md = f"""# Cohen's d and held-out Bradley-Terry log-likelihood — PEBS vs pop-slope
 
 Addresses reviewer weakness W4(i-ii) on the paper's §4.1 RMSE headline.
 
@@ -579,17 +579,17 @@ Addresses reviewer weakness W4(i-ii) on the paper's §4.1 RMSE headline.
 
 Per-user k=5 CV RMSE, 1394 users:
 
-|                    | pop_slope | pilsd_ols | pilsd_shrunk |
+|                    | pop_slope | pebs_ols | pebs_shrunk |
 |---                 |---       |---       |---          |
-| Mean RMSE (points) | {t1['rmse_pop_mean']:.4f}    | {t1['rmse_pilsd_ols_mean']:.4f}    | {t1['rmse_pilsd_shrunk_mean']:.4f}      |
-| NRMSE (÷ SD={r['data']['sd_score_user']:.2f}) | {n1['nrmse_pop_slope_mean']:.4f}   | {n1['nrmse_pilsd_ols_mean']:.4f}    | {n1['nrmse_pilsd_shrunk_mean']:.4f}     |
+| Mean RMSE (points) | {t1['rmse_pop_mean']:.4f}    | {t1['rmse_pebs_ols_mean']:.4f}    | {t1['rmse_pebs_shrunk_mean']:.4f}      |
+| NRMSE (÷ SD={r['data']['sd_score_user']:.2f}) | {n1['nrmse_pop_slope_mean']:.4f}   | {n1['nrmse_pebs_ols_mean']:.4f}    | {n1['nrmse_pebs_shrunk_mean']:.4f}     |
 
-**Effect sizes (PILSD_shrunk vs pop_slope, positive = PILSD better)**:
+**Effect sizes (PEBS_shrunk vs pop_slope, positive = PEBS better)**:
 - Paired Cohen's d = **{d_p:.4f}** 95% CI [{ci_p[0]:.4f}, {ci_p[1]:.4f}] — {t1['paired_d_interpretation']}
 - Pooled Cohen's d_s = **{d_s:.4f}** 95% CI [{ci_s[0]:.4f}, {ci_s[1]:.4f}] — {t1['pooled_d_interpretation']}
-- Absolute RMSE drop in SD units = **{n1['nrmse_absolute_drop_in_sd_units']:.4f}** (pop mean RMSE − PILSD mean RMSE) / SD(score_user)
+- Absolute RMSE drop in SD units = **{n1['nrmse_absolute_drop_in_sd_units']:.4f}** (pop mean RMSE − PEBS mean RMSE) / SD(score_user)
 
-**Aux — PILSD naive OLS (no shrinkage) vs pop_slope**:
+**Aux — PEBS naive OLS (no shrinkage) vs pop_slope**:
 - Paired d = {t1['paired_d_ols_vs_pop_aux']:.4f}, pooled d_s = {t1['pooled_d_ols_vs_pop_aux']:.4f} (shrinkage improves effect size)
 
 ### Cohen's d interpretation
@@ -597,7 +597,7 @@ Per-user k=5 CV RMSE, 1394 users:
 Cohen (1988) thresholds: 0.2 small, 0.5 medium, 0.8 large.
 
 - **Paired d = {d_p:.2f}** is **{t1['paired_d_interpretation'].split(' (')[0]}** by Cohen's thresholds.
-- The paired form is the correct effect size here because each user gets both arms (within-subject design), and the paired d accounts for the strong correlation between a user's pop_slope and PILSD RMSE (a user with noisy scores is hard to predict under either method).
+- The paired form is the correct effect size here because each user gets both arms (within-subject design), and the paired d accounts for the strong correlation between a user's pop_slope and PEBS RMSE (a user with noisy scores is hard to predict under either method).
 - Pooled d_s ({d_s:.2f}) treats the two arms as independent — this is **conservative** for a within-subject design and underestimates the effect.
 - Both are stable under cluster bootstrap (user_id clusters; CI widths < 0.05).
 
@@ -610,32 +610,32 @@ BT probability of correctly predicting chosen:
 
 NLL = -log(P_j). Per-user held-out; {bt['n_pairs']:,} pairs from {r['data']['n_users_in_bt']:,} users.
 
-|                        | pop_slope (β_pop={r['pop_calibration']['beta_pop']:.3f}) | pilsd_shrunk (per-user β_j) |
+|                        | pop_slope (β_pop={r['pop_calibration']['beta_pop']:.3f}) | pebs_shrunk (per-user β_j) |
 |---                     |---                                                 |---                         |
-| Mean NLL               | {bt['mean_nll_pop']:.6f}    | {bt['mean_nll_pilsd_shrunk']:.6f}        |
-| Pair accuracy (argmax) | {bt['pair_accuracy_pop']:.4f}    | {bt['pair_accuracy_pilsd_shrunk']:.4f}                           |
+| Mean NLL               | {bt['mean_nll_pop']:.6f}    | {bt['mean_nll_pebs_shrunk']:.6f}        |
+| Pair accuracy (argmax) | {bt['pair_accuracy_pop']:.4f}    | {bt['pair_accuracy_pebs_shrunk']:.4f}                           |
 
-**Paired per-pair Δ NLL (pop − PILSD, positive = PILSD better)**:
+**Paired per-pair Δ NLL (pop − PEBS, positive = PEBS better)**:
 - Mean Δ NLL = **{bt['mean_delta_nll_pair_level']:+.6f}** 95% CI [{bt['mean_delta_nll_pair_level_ci95'][0]:+.6f}, {bt['mean_delta_nll_pair_level_ci95'][1]:+.6f}]
 - Median Δ NLL = {bt['median_delta_nll_pair_level']:+.6f}  ← **distribution is near-symmetric at median**
 - Relative improvement vs pop-slope NLL: **{bt['relative_improvement_nll_pct']:+.2f}%** (mean-level)
 - Paired t-test p = **{bt['paired_t_p_pair_level']:.3e}**  (t = {bt['paired_t_stat']:.2f})  ← **significant on mean**
-- Sign-test p (where PILSD strictly wins, ties excluded) = {bt['sign_test_p']:.3e}  (pos/neg = {bt['n_pos_vs_neg'][0]}/{bt['n_pos_vs_neg'][1]})
+- Sign-test p (where PEBS strictly wins, ties excluded) = {bt['sign_test_p']:.3e}  (pos/neg = {bt['n_pos_vs_neg'][0]}/{bt['n_pos_vs_neg'][1]})
 - Wilcoxon signed-rank p = {bt['wilcoxon_p_pair_level']:.3e}  ← **NOT significant** because median ≈ 0
 - Cohen's d (paired, per-pair) = {bt['paired_d_delta_nll']:.4f}  (trivial — the mean is dragged by tails)
-- Fraction of pairs where PILSD strictly wins = {bt['frac_pairs_pilsd_wins']:.2%}
+- Fraction of pairs where PEBS strictly wins = {bt['frac_pairs_pebs_wins']:.2%}
 
 ### Tail-concentrated improvement
 
 The mean-NLL improvement is **concentrated on hard pairs** where the pop-slope is confidently wrong:
 
-| pair difficulty (by pop NLL) | mean Δ NLL (pop − PILSD) |
+| pair difficulty (by pop NLL) | mean Δ NLL (pop − PEBS) |
 |---                          |---                       |
 | Easy (pop NLL < median)     | {bt['tail_analysis']['mean_delta_on_easy_pairs_pop_below_q50']:+.4f}                   |
 | Hard (pop NLL > q75)        | {bt['tail_analysis']['mean_delta_on_hard_pairs_pop_above_q75']:+.4f}                   |
 | Hardest (pop NLL > q95)     | {bt['tail_analysis']['mean_delta_on_hardest_pairs_pop_above_q95']:+.4f}                   |
 
-Quantiles of per-pair Δ NLL (pop − PILSD):
+Quantiles of per-pair Δ NLL (pop − PEBS):
 
 | q01 | q05 | q25 | q50 | q75 | q95 | q99 |
 |---|---|---|---|---|---|---|
@@ -643,7 +643,7 @@ Quantiles of per-pair Δ NLL (pop − PILSD):
 
 **Per-user-level aggregation (each user contributes one mean-NLL):**
 - Paired d on user-mean Δ NLL = {bt['per_user_paired_d_mean_nll']:.4f}
-- Fraction of users where PILSD wins = {bt['per_user_frac_users_pilsd_wins']:.2%}
+- Fraction of users where PEBS wins = {bt['per_user_frac_users_pebs_wins']:.2%}
 - Wilcoxon p = {bt['per_user_wilcoxon_p']:.3e}
 
 ## Honest interpretation
@@ -657,27 +657,27 @@ Quantiles of per-pair Δ NLL (pop − PILSD):
 
 2. **BUT paired Cohen's d = {d_p:.2f}** is {t1['paired_d_interpretation'].split(' (')[0]}: because per-user RMSE is strongly correlated across arms (same user, same irreducible noise floor), the paired-d magnifies the systematic component. This is the right effect-size for a within-subject design.
 
-3. **Pair accuracy is exactly unchanged** ({bt['pair_accuracy_pop']:.4f} vs {bt['pair_accuracy_pilsd_shrunk']:.4f}) — expected, because sign(β_j · Δrm) = sign(β_pop · Δrm) whenever both β's have the same sign (they do for >99.8% of users). The reviewer's (i) pair-accuracy argument is **empirically correct**.
+3. **Pair accuracy is exactly unchanged** ({bt['pair_accuracy_pop']:.4f} vs {bt['pair_accuracy_pebs_shrunk']:.4f}) — expected, because sign(β_j · Δrm) = sign(β_pop · Δrm) whenever both β's have the same sign (they do for >99.8% of users). The reviewer's (i) pair-accuracy argument is **empirically correct**.
 
-4. **Held-out BT log-likelihood favours PILSD on the mean, not the median**:
+4. **Held-out BT log-likelihood favours PEBS on the mean, not the median**:
    - Mean Δ NLL = {bt['mean_delta_nll_pair_level']:+.4f} (95% CI excludes zero), paired t-test p = {bt['paired_t_p_pair_level']:.2e}.
    - Median Δ NLL = {bt['median_delta_nll_pair_level']:+.4f}; Wilcoxon p = {bt['wilcoxon_p_pair_level']:.2f} (not significant).
-   - Sign test: PILSD strictly wins {bt['frac_pairs_pilsd_wins']:.1%} of pairs (binomial p = {bt['sign_test_p']:.2e}).
+   - Sign test: PEBS strictly wins {bt['frac_pairs_pebs_wins']:.1%} of pairs (binomial p = {bt['sign_test_p']:.2e}).
    - **Resolution**: improvement is tail-concentrated. On pop-easy pairs Δ NLL = {bt['tail_analysis']['mean_delta_on_easy_pairs_pop_below_q50']:+.3f} (nothing), on pop-hard pairs Δ NLL = {bt['tail_analysis']['mean_delta_on_hard_pairs_pop_above_q75']:+.3f}, on pop-hardest 5% of pairs Δ NLL = {bt['tail_analysis']['mean_delta_on_hardest_pairs_pop_above_q95']:+.3f}.
-   - Interpretation: PILSD matters most exactly when a user's β_j differs substantially from β_pop — e.g. users with systematically compressed or stretched scoring. On "typical" pairs both arms predict nearly identical probabilities, so Wilcoxon (rank-based) sees a null; paired t (mean-based) sees a real signal on the tails.
+   - Interpretation: PEBS matters most exactly when a user's β_j differs substantially from β_pop — e.g. users with systematically compressed or stretched scoring. On "typical" pairs both arms predict nearly identical probabilities, so Wilcoxon (rank-based) sees a null; paired t (mean-based) sees a real signal on the tails.
 
-5. **Per-user aggregation is weaker still**: d = {bt['per_user_paired_d_mean_nll']:.2f}, frac-users-wins = {bt['per_user_frac_users_pilsd_wins']:.0%}, Wilcoxon p = {bt['per_user_wilcoxon_p']:.2f}. On a per-user-averaged basis PILSD does NOT beat pop-slope. The tail-concentration is real: a minority of users' hard pairs carry most of the signal.
+5. **Per-user aggregation is weaker still**: d = {bt['per_user_paired_d_mean_nll']:.2f}, frac-users-wins = {bt['per_user_frac_users_pebs_wins']:.0%}, Wilcoxon p = {bt['per_user_wilcoxon_p']:.2f}. On a per-user-averaged basis PEBS does NOT beat pop-slope. The tail-concentration is real: a minority of users' hard pairs carry most of the signal.
 
 ### Recommended paper change
 
 Replace the current "RMSE 25.52→23.33, +8.58%" one-liner in §4.1 with the following two-sentence block:
 
-> Per-user 5-fold held-out RMSE drops from 25.52 (pop-slope) to 23.33 (PILSD shrunk),
+> Per-user 5-fold held-out RMSE drops from 25.52 (pop-slope) to 23.33 (PEBS shrunk),
 > a 2.19-point reduction corresponding to Cohen's paired d = {d_p:.2f} (95% CI [{ci_p[0]:.2f}, {ci_p[1]:.2f}]);
 > absolute drop is {n1['nrmse_absolute_drop_in_sd_units']:.2f} SDs of the underlying Likert scale, but the within-subject
 > correlation across arms makes this a {t1['paired_d_interpretation'].split(' (')[0]} effect in paired-d terms (pooled d_s = {d_s:.2f}).
 > On the monotone-invariance-breaking held-out Bradley–Terry log-likelihood — directly
-> tied to the RLHF RM loss — PILSD reduces mean NLL by {bt['relative_improvement_nll_pct']:+.1f}% (paired t p = {bt['paired_t_p_pair_level']:.1e},
+> tied to the RLHF RM loss — PEBS reduces mean NLL by {bt['relative_improvement_nll_pct']:+.1f}% (paired t p = {bt['paired_t_p_pair_level']:.1e},
 > 95% CI [{bt['mean_delta_nll_pair_level_ci95'][0]:+.3f}, {bt['mean_delta_nll_pair_level_ci95'][1]:+.3f}]), with the gain concentrated on the hardest 25% of pairs
 > where the global β_pop is systematically mis-calibrated for a user.
 
@@ -685,8 +685,8 @@ Replace the current "RMSE 25.52→23.33, +8.58%" one-liner in §4.1 with the fol
 
 - **Reviewer's pair-accuracy point (i)**: correct and empirically validated. Paper must disclose this, not dodge.
 - **Reviewer's SD-normalization point (ii)**: correct on absolute scale ({n1['nrmse_absolute_drop_in_sd_units']:.3f} SD), but under-sells the {t1['paired_d_interpretation'].split(' (')[0]}-sized paired-d within-subject effect.
-- **Reviewer's proposed BT log-likelihood replacement**: validates PILSD on the MEAN (paired t p = {bt['paired_t_p_pair_level']:.1e}) but NOT on the median (Wilcoxon p = {bt['wilcoxon_p_pair_level']:.2f}). Improvement is tail-concentrated, which is interpretable: the per-user β_j only departs from β_pop for users whose scoring geometry differs from the pooled geometry.
-- **Verdict**: PILSD is defensible on (a) continuous held-out user-score RMSE with medium paired-d, and (b) held-out BT log-likelihood mean. It is NOT defensible on (i) pair accuracy, (ii) median BT NLL, or (iii) per-user-averaged BT NLL. The paper should report all of these honestly.
+- **Reviewer's proposed BT log-likelihood replacement**: validates PEBS on the MEAN (paired t p = {bt['paired_t_p_pair_level']:.1e}) but NOT on the median (Wilcoxon p = {bt['wilcoxon_p_pair_level']:.2f}). Improvement is tail-concentrated, which is interpretable: the per-user β_j only departs from β_pop for users whose scoring geometry differs from the pooled geometry.
+- **Verdict**: PEBS is defensible on (a) continuous held-out user-score RMSE with medium paired-d, and (b) held-out BT log-likelihood mean. It is NOT defensible on (i) pair accuracy, (ii) median BT NLL, or (iii) per-user-averaged BT NLL. The paper should report all of these honestly.
 """
     return md
 

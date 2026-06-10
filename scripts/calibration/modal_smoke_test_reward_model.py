@@ -10,17 +10,17 @@ test only — goal is to confirm:
   (c) Checkpoint round-trips cleanly via save_pretrained/from_pretrained
 
 Smoke-test scale: 128 pairs, 8 annotators, 50 training steps, ~2 minutes on A10.
-NOT a real training run — that lives on Lambda with Qwen2.5-7B + PRISM 8k pairs.
+NOT a real training run — that runs on the training GPU with Qwen2.5-7B + PRISM 8k pairs.
 
 Per feedback_sota_implementations.md: we reuse TRL/transformers rather than
 hand-rolling. Per adversarial-theorem-review/SKILL.md §4.5: we verify the stack
-end-to-end before burning GPU-hours on Lambda.
+end-to-end before burning GPU-hours on the training GPU.
 """
 from __future__ import annotations
 
 import modal
 
-app = modal.App("pilsd-rm-smoke")
+app = modal.App("pebs-rm-smoke")
 
 image = (
     modal.Image.debian_slim(python_version="3.11")
@@ -36,7 +36,7 @@ image = (
     .env({"HF_HOME": "/hf-cache", "TRANSFORMERS_OFFLINE": "0"})
 )
 
-vol = modal.Volume.from_name("pilsd-hf-cache", create_if_missing=True)
+vol = modal.Volume.from_name("pebs-hf-cache", create_if_missing=True)
 
 
 @app.function(
@@ -164,4 +164,4 @@ def smoke_test():
 def main():
     result = smoke_test.remote()
     print(f"\n[local] smoke-test result: {result}")
-    print("\n✅ Ready for Lambda scale-up with Qwen2.5-7B + PRISM 8k pairs")
+    print("\n✅ Ready for full-GPU scale-up with Qwen2.5-7B + PRISM 8k pairs")

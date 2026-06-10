@@ -7,19 +7,19 @@ Arms (evaluated on SAME 5-fold CV splits, matching eval_user_score_mse_shrunk.py
 
   no_calib              predict train-fold mean of y
   pop_slope_linear      global α₀ + β₀ · x           (linear baseline)
-  pilsd_linear_ols      per-user linear OLS on train fold (naive)
-  pilsd_linear_shrunk   EB shrunk linear (ω = τ²/(τ²+V))
+  pebs_linear_ols      per-user linear OLS on train fold (naive)
+  pebs_linear_shrunk   EB shrunk linear (ω = τ²/(τ²+V))
   pop_slope_quadratic   global α₀ + β₀ · x + γ₀ · x² (quadratic pop baseline)
-  pilsd_quadratic_ols   per-user quadratic OLS on train fold
-  pilsd_quadratic_shrunk EB shrunk quadratic (ω applied per coefficient)
+  pebs_quadratic_ols   per-user quadratic OLS on train fold
+  pebs_quadratic_shrunk EB shrunk quadratic (ω applied per coefficient)
 
 The shrinkage form is identical in structure: for each coefficient c ∈ {α,β,γ}
 we compute ω_c = τ_c² / (τ_c² + V_c), where τ_c² is the between-user variance
 of the coefficient (after removing mean within-user sampling variance) and
 V_c is the within-fold sampling variance of the coefficient's OLS estimate.
 
-Key comparison: Wilcoxon paired on rmse_pilsd_quadratic_shrunk vs
-rmse_pilsd_linear_shrunk, and a cluster-bootstrap 95% CI on the mean delta
+Key comparison: Wilcoxon paired on rmse_pebs_quadratic_shrunk vs
+rmse_pebs_linear_shrunk, and a cluster-bootstrap 95% CI on the mean delta
 (positive -> quadratic is better).
 
 Refs: Hastie et al. 2009 ESL §7.10; Pinheiro & Bates 2000 §2;
@@ -176,11 +176,11 @@ def main():
     arm_names = [
         "no_calib",
         "pop_slope_linear",
-        "pilsd_linear_ols",
-        "pilsd_linear_shrunk",
+        "pebs_linear_ols",
+        "pebs_linear_shrunk",
         "pop_slope_quadratic",
-        "pilsd_quadratic_ols",
-        "pilsd_quadratic_shrunk",
+        "pebs_quadratic_ols",
+        "pebs_quadratic_shrunk",
     ]
 
     per_user_rows = []
@@ -209,29 +209,29 @@ def main():
             yhat = pop_int_lin + pop_slope_lin * x_te
             squared["pop_slope_linear"].extend(((yhat - y_te) ** 2).tolist())
 
-            # (3) PILSD linear OLS
+            # (3) PEBS linear OLS
             a, b, Va, Vb = ols_linear_with_V(x_tr, y_tr)
             yhat = a + b * x_te
-            squared["pilsd_linear_ols"].extend(((yhat - y_te) ** 2).tolist())
+            squared["pebs_linear_ols"].extend(((yhat - y_te) ** 2).tolist())
 
-            # (4) PILSD linear shrunk (coefficient-wise EB)
+            # (4) PEBS linear shrunk (coefficient-wise EB)
             wa = tau_a_lin / (tau_a_lin + Va) if np.isfinite(Va) else 0.0
             wb = tau_b_lin / (tau_b_lin + Vb) if np.isfinite(Vb) else 0.0
             a_s = wa * a + (1 - wa) * pop_int_lin
             b_s = wb * b + (1 - wb) * pop_slope_lin
             yhat = a_s + b_s * x_te
-            squared["pilsd_linear_shrunk"].extend(((yhat - y_te) ** 2).tolist())
+            squared["pebs_linear_shrunk"].extend(((yhat - y_te) ** 2).tolist())
 
             # (5) Pop quadratic
             yhat = pop_int_qd + pop_lin_qd * x_te + pop_quad_qd * x_te ** 2
             squared["pop_slope_quadratic"].extend(((yhat - y_te) ** 2).tolist())
 
-            # (6) PILSD quadratic OLS
+            # (6) PEBS quadratic OLS
             aq, bq, cq, Vaq, Vbq, Vcq = ols_quadratic_with_V(x_tr, y_tr)
             yhat = aq + bq * x_te + cq * x_te ** 2
-            squared["pilsd_quadratic_ols"].extend(((yhat - y_te) ** 2).tolist())
+            squared["pebs_quadratic_ols"].extend(((yhat - y_te) ** 2).tolist())
 
-            # (7) PILSD quadratic shrunk — coefficient-wise ω toward pop quadratic
+            # (7) PEBS quadratic shrunk — coefficient-wise ω toward pop quadratic
             waq = tau_a_qd / (tau_a_qd + Vaq) if np.isfinite(Vaq) else 0.0
             wbq = tau_b_qd / (tau_b_qd + Vbq) if np.isfinite(Vbq) else 0.0
             wcq = tau_c_qd / (tau_c_qd + Vcq) if np.isfinite(Vcq) else 0.0
@@ -239,7 +239,7 @@ def main():
             b_sq = wbq * bq + (1 - wbq) * pop_lin_qd
             c_sq = wcq * cq + (1 - wcq) * pop_quad_qd
             yhat = a_sq + b_sq * x_te + c_sq * x_te ** 2
-            squared["pilsd_quadratic_shrunk"].extend(((yhat - y_te) ** 2).tolist())
+            squared["pebs_quadratic_shrunk"].extend(((yhat - y_te) ** 2).tolist())
 
         row = {"user_id": uid, "n": n,
                **{f"rmse_{arm}": float(np.sqrt(np.mean(squared[arm])))
@@ -276,17 +276,17 @@ def main():
 
     comparisons = {
         # Headline comparison
-        "quadratic_shrunk_vs_linear_shrunk": paired("rmse_pilsd_quadratic_shrunk",
-                                                    "rmse_pilsd_linear_shrunk"),
-        "quadratic_ols_vs_linear_ols":       paired("rmse_pilsd_quadratic_ols",
-                                                    "rmse_pilsd_linear_ols"),
+        "quadratic_shrunk_vs_linear_shrunk": paired("rmse_pebs_quadratic_shrunk",
+                                                    "rmse_pebs_linear_shrunk"),
+        "quadratic_ols_vs_linear_ols":       paired("rmse_pebs_quadratic_ols",
+                                                    "rmse_pebs_linear_ols"),
         "pop_quadratic_vs_pop_linear":       paired("rmse_pop_slope_quadratic",
                                                     "rmse_pop_slope_linear"),
         # Shrunk vs OLS within each family
-        "quadratic_shrunk_vs_quadratic_ols": paired("rmse_pilsd_quadratic_shrunk",
-                                                    "rmse_pilsd_quadratic_ols"),
-        "linear_shrunk_vs_linear_ols":       paired("rmse_pilsd_linear_shrunk",
-                                                    "rmse_pilsd_linear_ols"),
+        "quadratic_shrunk_vs_quadratic_ols": paired("rmse_pebs_quadratic_shrunk",
+                                                    "rmse_pebs_quadratic_ols"),
+        "linear_shrunk_vs_linear_ols":       paired("rmse_pebs_linear_shrunk",
+                                                    "rmse_pebs_linear_ols"),
     }
     print(f"\n=== Paired Wilcoxon (negative mean_delta -> FIRST is better) ===")
     for name, d in comparisons.items():
@@ -308,24 +308,24 @@ def main():
         lo, hi = np.percentile(deltas, [2.5, 97.5])
         return float(lo), float(hi), float(np.mean(deltas)), deltas
 
-    a_lin = pu.rmse_pilsd_linear_shrunk.to_numpy()
-    a_qd = pu.rmse_pilsd_quadratic_shrunk.to_numpy()
+    a_lin = pu.rmse_pebs_linear_shrunk.to_numpy()
+    a_qd = pu.rmse_pebs_quadratic_shrunk.to_numpy()
     lo, hi, m, _ = boot_ci(a_lin, a_qd)
     print(f"\n=== Headline: mean(RMSE_linear_shrunk) - mean(RMSE_quadratic_shrunk) ===")
-    print(f"  point estimate: {agg_mean['pilsd_linear_shrunk'] - agg_mean['pilsd_quadratic_shrunk']:+.5f}")
+    print(f"  point estimate: {agg_mean['pebs_linear_shrunk'] - agg_mean['pebs_quadratic_shrunk']:+.5f}")
     print(f"  cluster-bootstrap mean: {m:+.5f}")
     print(f"  95% CI: [{lo:+.5f}, {hi:+.5f}]  (n_boot={args.n_boot})")
     includes_zero = lo <= 0.0 <= hi
     print(f"  CI includes 0? {includes_zero}")
 
     # Relative improvements vs pop_slope_linear (matches paper headline frame)
-    rel_lin = 100 * (agg_mean["pop_slope_linear"] - agg_mean["pilsd_linear_shrunk"]) / agg_mean["pop_slope_linear"]
-    rel_qd = 100 * (agg_mean["pop_slope_linear"] - agg_mean["pilsd_quadratic_shrunk"]) / agg_mean["pop_slope_linear"]
-    rel_qd_vs_lin = 100 * (agg_mean["pilsd_linear_shrunk"] - agg_mean["pilsd_quadratic_shrunk"]) / agg_mean["pilsd_linear_shrunk"]
+    rel_lin = 100 * (agg_mean["pop_slope_linear"] - agg_mean["pebs_linear_shrunk"]) / agg_mean["pop_slope_linear"]
+    rel_qd = 100 * (agg_mean["pop_slope_linear"] - agg_mean["pebs_quadratic_shrunk"]) / agg_mean["pop_slope_linear"]
+    rel_qd_vs_lin = 100 * (agg_mean["pebs_linear_shrunk"] - agg_mean["pebs_quadratic_shrunk"]) / agg_mean["pebs_linear_shrunk"]
 
     print(f"\n=== Relative improvement vs pop_slope_linear (paper-style) ===")
-    print(f"  pilsd_linear_shrunk:    {rel_lin:+.3f}%")
-    print(f"  pilsd_quadratic_shrunk: {rel_qd:+.3f}%")
+    print(f"  pebs_linear_shrunk:    {rel_lin:+.3f}%")
+    print(f"  pebs_quadratic_shrunk: {rel_qd:+.3f}%")
     print(f"  quadratic over linear (of linear mean): {rel_qd_vs_lin:+.3f}%")
 
     # -------------------- Verdict --------------------
@@ -359,7 +359,7 @@ def main():
         "aggregate_rmse_median": agg_median,
         "comparisons": comparisons,
         "bootstrap_delta_linear_minus_quadratic_shrunk": {
-            "point_estimate": float(agg_mean["pilsd_linear_shrunk"] - agg_mean["pilsd_quadratic_shrunk"]),
+            "point_estimate": float(agg_mean["pebs_linear_shrunk"] - agg_mean["pebs_quadratic_shrunk"]),
             "bootstrap_mean": float(m),
             "ci95_lo": float(lo),
             "ci95_hi": float(hi),
@@ -367,8 +367,8 @@ def main():
             "n_boot": int(args.n_boot),
         },
         "relative_improvement_vs_pop_slope_linear_pct": {
-            "pilsd_linear_shrunk": float(rel_lin),
-            "pilsd_quadratic_shrunk": float(rel_qd),
+            "pebs_linear_shrunk": float(rel_lin),
+            "pebs_quadratic_shrunk": float(rel_qd),
             "quadratic_over_linear_of_linear_mean_pct": float(rel_qd_vs_lin),
         },
         "verdict": verdict,

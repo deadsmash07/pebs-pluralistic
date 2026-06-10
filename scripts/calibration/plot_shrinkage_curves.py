@@ -1,6 +1,6 @@
 """Paper figure: shrinkage vs naive OLS vs pop-slope learning curves.
 
-Visualizes the key iter+N+11/12 finding:
+Visualizes the key finding:
   - Break-even k drops from 20 (naive OLS) to 5 (shrunk)
   - k=2 catastrophic blow-up (135 RMSE) eliminated (→ 26.6 shrunk)
   - H2e within-user CV headline: 7.02% (naive) → 8.58% (shrunk)
@@ -88,10 +88,10 @@ def main():
             continue
         rows.append({
             "k": k,
-            "ols_mean": rec_cs["rmse_pilsd"]["mean"],
-            "ols_median": rec_cs["rmse_pilsd"]["median"],
-            "ols_p25": rec_cs["rmse_pilsd"].get("p25", np.nan),
-            "ols_p75": rec_cs["rmse_pilsd"].get("p75", np.nan),
+            "ols_mean": rec_cs["rmse_pebs"]["mean"],
+            "ols_median": rec_cs["rmse_pebs"]["median"],
+            "ols_p25": rec_cs["rmse_pebs"].get("p25", np.nan),
+            "ols_p75": rec_cs["rmse_pebs"].get("p75", np.nan),
             "shrunk_mean": rec_sh["shrunk_mean"] if rec_sh else np.nan,
             "shrunk_median": rec_sh["shrunk_median"] if rec_sh else np.nan,
             "n_users": rec_cs["n_users"],
@@ -103,7 +103,7 @@ def main():
     shrunk_p75 = []
     if sh_pu is not None:
         for k in budgets:
-            col = f"rmse_pilsd_shrunk_k{k}"
+            col = f"rmse_pebs_shrunk_k{k}"
             if col in sh_pu.columns:
                 vals = sh_pu[col].dropna()
                 shrunk_p25.append(float(vals.quantile(0.25)) if len(vals) else np.nan)
@@ -134,7 +134,7 @@ def main():
     ax.plot(df["k"], df["ols_mean"], color="#d97757", linewidth=2.3, marker="o",
             label="naive OLS (mean)")
     ax.plot(df["k"], df["shrunk_mean"], color="#3b8ea5", linewidth=2.3, marker="s",
-            label="EB-shrunk PILSD (mean)")
+            label="EB-shrunk PEBS (mean)")
     # Baselines
     ax.axhline(pop_mean, color="black", linestyle=":", linewidth=1.3, label=f"pop-slope = {pop_mean:.2f}")
     ax.axhline(nocal_mean, color="gray", linestyle=":", linewidth=1.0, label=f"no-calib = {nocal_mean:.2f}")
@@ -167,8 +167,8 @@ def main():
 
     # Panel 2: H2e 4-arm bar chart
     ax = axes[1]
-    arms = ["no_calib", "pop_slope", "pilsd_ols", "pilsd_shrunk"]
-    labels = ["no calib", "pop-slope\n(baseline)", "PILSD\n(naive OLS)", "PILSD\n(EB shrunk)"]
+    arms = ["no_calib", "pop_slope", "pebs_ols", "pebs_shrunk"]
+    labels = ["no calib", "pop-slope\n(baseline)", "PEBS\n(naive OLS)", "PEBS\n(EB shrunk)"]
     means = [h2e["rmse_mean"][a] for a in arms]
     medians = [h2e["rmse_median"][a] for a in arms]
     colors = ["gray", "black", "#d97757", "#3b8ea5"]

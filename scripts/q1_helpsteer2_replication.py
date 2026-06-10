@@ -1,25 +1,23 @@
-"""Q1 - HelpSteer2 cross-corpus PILSD replication.
+"""Q1 - HelpSteer2 cross-corpus PEBS replication.
 
-Closes the "PRISM-only" generalization attack flagged in `memory/p0_experiment_queue_v1_2026_05_03.md`
-Q1 brief and `Skill: icml-neurips-critical-reviewer-2026` Pass 5 (out-of-distribution
-cross-corpus check). Hypothesis: PILSD's +8.58% PRISM headline replicates on
-NVIDIA HelpSteer2 (Wang et al. 2024) with REAL annotator-rating disagreement
-data (not the F6 anti-pluralistic 5-attribute-as-raters mistake; Phase A
-pre-closure).
+Addresses the out-of-distribution generalization question: does PEBS's
++8.58% PRISM headline replicate on NVIDIA HelpSteer2 (Wang et al. 2024)
+with REAL annotator-rating disagreement data (rather than treating the five
+quality attributes as pseudo-raters)?
 
-DESIGN-DECISION DOCUMENTED HONESTLY (Skill: honest-disclosure SCOPE-not-RETRACT)
-================================================================================
-The Q1 brief assumed an "annotator_id field" exists in HelpSteer2. **It does not.**
+DESIGN DECISION DOCUMENTED HONESTLY
+===================================
+The original design assumed an "annotator_id field" exists in HelpSteer2. **It does not.**
 NVIDIA's released HelpSteer2 (`nvidia/HelpSteer2`) anonymizes annotators across rows;
 each row's `helpfulness` / `correctness` / `coherence` / `complexity` / `verbosity`
 is reduced to a single mean Likert score in the main config. The `disagreements`
 config exposes the per-annotator ratings as a list `[r_1, r_2, r_3]` per row,
 **but list-position is NOT a stable cross-row annotator identifier** (the HelpSteer2
 paper, Wang et al. 2024 Section 3.4, explicitly states annotator order is not
-preserved across rows). Therefore PRISM-style per-rater PILSD (cluster=user_id with
+preserved across rows). Therefore PRISM-style per-rater PEBS (cluster=user_id with
 n_obs=10..500 per user) is **structurally infeasible** on HelpSteer2.
 
-Closest defensible PILSD analog the dataset DOES support:
+Closest defensible PEBS analog the dataset DOES support:
   cluster_id = prompt_hash
   observations = (response_idx, annotator_slot) tuples within each prompt
   target y = annotator's helpfulness rating for that response
@@ -27,77 +25,75 @@ Closest defensible PILSD analog the dataset DOES support:
 
 Each prompt has K=2-4 responses x 3 annotators = approx 6 obs per cluster. This
 satisfies MIN_UTT_PER_CLUSTER=6 (matches PRISM-OASST2 headline convention) but
-is WEAKER than PRISM's median-50 obs/user. We pre-register that this difference
+is WEAKER than PRISM's median-50 obs/user. We note up front that this difference
 is expected to **bound the gain magnitude downward** by Morris (1983) eq. 2.9
-(small-cluster MoM bias + high sampling-V_j -> omega_j -> 0 -> PILSD approx pop-slope).
-Predicted gain: 1-3pp (MODERATE-HELPSTEER2-PARTIAL-CONFIRMS) most likely; >=3pp
-ESTABLISHED would be a positive surprise; CI straddling zero would be the honest
+(small-cluster MoM bias + high sampling-V_j -> omega_j -> 0 -> PEBS approx pop-slope).
+Predicted gain: 1-3pp (PARTIAL-HELPSTEER2-PARTIAL-CONFIRMS) most likely; >=3pp
+CONFIRMED would be a positive surprise; CI straddling zero would be the honest
 null-by-construction outcome.
 
-This is FALSIFIER-class evidence in the strict pre-registration sense - testing
-PILSD's APPLICABILITY BOUNDARY on a corpus whose annotation schema differs from
+This is falsifier-class evidence - testing
+PEBS's APPLICABILITY BOUNDARY on a corpus whose annotation schema differs from
 PRISM. A clean POSITIVE generalizes the headline; a clean NULL bounds it.
 
-Pipeline (mirrors wave_c_exp2_oasst2_replication + eval_oasst2_pilsd_calibrator)
+Pipeline (mirrors wave_c_exp2_oasst2_replication + eval_oasst2_pebs_calibrator)
 ------------------------------------------------------------------------------
 Stage A - score HelpSteer2 disagreements responses with Qwen2.5-7B-Instruct
           mean-response log-likelihood (matches PRISM headline RM):
           out: data/helpsteer2/helpsteer2_qwen7b_disagreements_scored.parquet
           (one row per (prompt_hash, response_hash) - approx 23k unique pairs)
 
-Stage B - Per-prompt PILSD calibrator on the scored parquet:
+Stage B - Per-prompt PEBS calibrator on the scored parquet:
           5-fold within-prompt CV; pop-OLS pre-pass for tau^2_alpha, tau^2_beta;
           per-prompt OLS with V_alpha, V_beta; omega_alpha=tau^2/(tau^2+V); same beta;
-          PILSD-shrunk = omega*per_cluster + (1-omega)*pop_slope.
+          PEBS-shrunk = omega*per_cluster + (1-omega)*pop_slope.
           Cluster-bootstrap by prompt_hash; B=2000.
 
-12-gate audit (Skill: research-grade-code-audit-pre-launch v1)
---------------------------------------------------------------
-G1 math-vs-code: VERBATIM PILSD math from eval_oasst2_pilsd_calibrator.py
-   (`ols_with_V` + `cluster_bootstrap_gain_ci` + 5-fold within-cluster CV).
-G2 hypothesis-vs-design: HONESTLY DOCUMENTED MISMATCH - the brief assumed
-   per-rater clusters; HelpSteer2 doesn't expose them. The closest defensible
-   analog (per-prompt clusters) is implemented + the limitation is pre-registered.
-G3 no silent-bypass: Stage-A output_parquet existence check is BY-PATH only;
-   re-run if --force-rescore or scored row count below MIN_SCORED_ROWS_FOR_VALID_CACHE.
-G4 pipeline integrity: gain_pct = (rmse_pop_slope - rmse_pilsd_shrunk) /
-   rmse_pop_slope * 100; identical formula to PRISM headline.
-G5 reference-implementation: math + bootstrap inherit verbatim from
-   1_Causal_RLHF/scripts/eval_oasst2_pilsd_calibrator.py (commit-anchored).
-G6 hyperparameter sanity: K_FOLDS=5 / N_BOOT=2000 / MIN_OBS_PER_CLUSTER=6 /
-   MAX_SEQ_LEN=2048 - matches PRISM headline + OASST2 replication conventions.
-G7 per-step diagnostic: Stage A logs scoring rate + ETA every 200 rows; Stage B
-   logs per-fold per-arm RMSE + cluster-bootstrap progress.
-G8 reproducibility: SEED=20260420 + bootstrap_seed=20260420 (matches OASST2);
-   git HEAD + parquet sha256 persisted in summary.json.
-G9 output schema: 4-class STRICT verdict-class per Skill: honest-disclosure 6.3.
-G10 compute envelope: Stage A ~3-4h (23k unique pairs x 7B nf4 mean-LL on rtx6000-1
-    96GB Blackwell ~2 row/s); Stage B ~5-10min CPU.
-G11 anti-overfitting: not theory-claiming.
-G12 honest-disclosure: 4-class verdict ENUMERATES the brief-vs-data design
-    mismatch + the small-cluster Morris-bound expectation.
+Design notes
+------------
+- Math: VERBATIM PEBS math from eval_oasst2_pebs_calibrator.py
+  (`ols_with_V` + `cluster_bootstrap_gain_ci` + 5-fold within-cluster CV).
+- Design mismatch documented honestly: the original design assumed
+  per-rater clusters; HelpSteer2 doesn't expose them. The closest defensible
+  analog (per-prompt clusters) is implemented + the limitation stated up front.
+- No silent-bypass: Stage-A output_parquet existence check is BY-PATH only;
+  re-run if --force-rescore or scored row count below MIN_SCORED_ROWS_FOR_VALID_CACHE.
+- Pipeline integrity: gain_pct = (rmse_pop_slope - rmse_pebs_shrunk) /
+  rmse_pop_slope * 100; identical formula to PRISM headline.
+- Reference implementation: math + bootstrap inherit verbatim from
+  eval_oasst2_pebs_calibrator.py.
+- Hyperparameters: K_FOLDS=5 / N_BOOT=2000 / MIN_OBS_PER_CLUSTER=6 /
+  MAX_SEQ_LEN=2048 - matches PRISM headline + OASST2 replication conventions.
+- Diagnostics: Stage A logs scoring rate + ETA every 200 rows; Stage B
+  logs per-fold per-arm RMSE + cluster-bootstrap progress.
+- Reproducibility: SEED=20260420 + bootstrap_seed=20260420 (matches OASST2);
+  git HEAD + parquet sha256 persisted in summary.json.
+- Compute: Stage A ~3-4h (23k unique pairs x 7B nf4 mean-LL on a
+  96GB GPU ~2 row/s); Stage B ~5-10min CPU.
+- The decision rule enumerates the design-vs-data mismatch and the
+  small-cluster Morris-bound expectation explicitly.
 
-4-class verdict-class STRICT (Skill: honest-disclosure 6.3)
-------------------------------------------------------------
-ESTABLISHED-HELPSTEER2-CONFIRMS-PRISM            gain >= +3pp + CI excludes 0 +
+Outcome classification
+----------------------
+CONFIRMED-HELPSTEER2-CONFIRMS-PRISM            gain >= +3pp + CI excludes 0 +
                                                   n_clusters_post_filter >= 500;
                                                   generalizes PRISM headline to
                                                   HelpSteer2 schema (with caveat
                                                   on per-prompt-vs-per-rater
                                                   cluster type).
-MODERATE-HELPSTEER2-PARTIAL-CONFIRMS              gain in [+1, +3]pp + CI
+PARTIAL-HELPSTEER2-PARTIAL-CONFIRMS              gain in [+1, +3]pp + CI
                                                   excludes 0; small-cluster
                                                   Morris-bound regime; consistent
-                                                  with PILSD mechanism but
+                                                  with PEBS mechanism but
                                                   attenuated by limited within-
                                                   cluster degrees of freedom.
-PRELIMINARY-INCONCLUSIVE-DATASET-SCHEMA-LIMIT     CI straddles zero; default
+TENTATIVE-INCONCLUSIVE-DATASET-SCHEMA-LIMIT     CI straddles zero; default
                                                   expectation given n_obs=6
                                                   per cluster + per-prompt
                                                   (not per-rater) cluster
                                                   structure.
-FALSIFIED-HELPSTEER2-DOES-NOT-REPLICATE           CI strictly negative;
-                                                  PILSD mechanism does NOT
+REJECTED-HELPSTEER2-DOES-NOT-REPLICATE           CI strictly negative;
+                                                  PEBS mechanism does NOT
                                                   generalize to per-prompt
                                                   clusters; paper claim must be
                                                   SCOPE-LIMITED to per-rater
@@ -106,7 +102,7 @@ FALSIFIED-HELPSTEER2-DOES-NOT-REPLICATE           CI strictly negative;
 Output
 ------
 results/track1_helpsteer2_replication/{summary.json, per_cluster.parquet}
-+ planned NeurIPS Tab cross-corpus row + 1-paragraph Limitations honest-disclosure clause.
++ a cross-corpus table row + a Limitations clause.
 
 References
 ----------
@@ -152,30 +148,30 @@ except ImportError as exc:
     raise ImportError("scipy required for cluster-bootstrap + Wilcoxon") from exc
 
 
-ROOT = Path(__file__).resolve().parents[2]                  # 3_PILSD_Standalone/
+ROOT = Path(__file__).resolve().parents[2]                  # 3_PEBS_Standalone/
 T1   = ROOT.parent / "1_Causal_RLHF"
 
 OUT_DIR = ROOT / "results" / "track1_helpsteer2_replication"
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 
-# Hyperparameters (PRISM-headline-anchored; mirror eval_oasst2_pilsd_calibrator.py)
+# Hyperparameters (PRISM-headline-anchored; mirror eval_oasst2_pebs_calibrator.py)
 SEED = 20260420                          # matches PRISM canonical
 BOOT_SEED = 20260420                     # matches PRISM canonical
-N_BOOT = 2000                            # matches Q1 brief
+N_BOOT = 2000
 K_FOLDS = 5
 MIN_OBS_PER_CLUSTER = 6                  # matches OASST2 headline (PRISM analog: 10)
-MIN_SCORED_ROWS_FOR_VALID_CACHE = 5_000  # G3: re-run Stage A if cache below
+MIN_SCORED_ROWS_FOR_VALID_CACHE = 5_000  # re-run Stage A if cache below
 MAX_PROMPT_TOKENS = 256
 MAX_RESPONSE_TOKENS = 256
 MODEL_ID_DEFAULT = "Qwen/Qwen2.5-7B-Instruct"
 
-# 4-class verdict-class thresholds (per Q1 brief)
-ESTABLISHED_GAIN_LO = 3.0    # ESTABLISHED if gain >= 3pp + CI excludes 0
-MODERATE_GAIN_LO = 1.0       # MODERATE if 1-3pp + CI excludes 0
+# Outcome thresholds
+ESTABLISHED_GAIN_LO = 3.0    # CONFIRMED if gain >= 3pp + CI excludes 0
+MODERATE_GAIN_LO = 1.0       # PARTIAL if 1-3pp + CI excludes 0
 MODERATE_GAIN_HI = 3.0
-N_CLUSTERS_FOR_ESTABLISHED = 500   # per Q1 brief
+N_CLUSTERS_FOR_ESTABLISHED = 500
 
-# HelpSteer2 5 attribute axes - Q1 brief restricts to helpfulness only (per-row
+# HelpSteer2 5 attribute axes - Q1 restricts to helpfulness only (per-row
 # Likert 0-4) for apples-to-apples with PRISM 0-100 scalar. Verbosity = closer
 # to a covariate; coherence/complexity/correctness are rater-content axes that
 # DO NOT correspond to the helpfulness target.
@@ -183,7 +179,7 @@ PRIMARY_TARGET_AXIS = "helpfulness"
 
 
 # ============================================================================
-# G8 reproducibility helpers
+# Reproducibility helpers
 # ============================================================================
 
 def file_sha256(p: Path) -> str:
@@ -268,7 +264,7 @@ def stage_a_score_with_qwen7b(
 ) -> dict:
     """Score each unique (prompt, response) with Qwen2.5-7B-Instruct mean-LL.
 
-    G5 reference-parity: replicates `1_Causal_RLHF/scripts/score_oasst2_with_qwen7b.py`
+    Reference-parity: replicates `score_oasst2_with_qwen7b.py`
     lines 215-230 verbatim --- separate prompt/response tokenization, concat,
     -100 mask on prompt positions, score = -loss (mean response log-likelihood).
     This is the canonical Stiennon (2020) / Ouyang (2022) RLHF reward proxy
@@ -389,14 +385,14 @@ def stage_a_score_with_qwen7b(
 
 
 # ============================================================================
-# Stage B - PILSD math (verbatim from eval_oasst2_pilsd_calibrator.py + minor
+# Stage B - PEBS math (verbatim from eval_oasst2_pebs_calibrator.py + minor
 # rename: user_id -> cluster_id where cluster = prompt_hash for HelpSteer2)
 # ============================================================================
 
 
 def ols_with_V(x: np.ndarray, y: np.ndarray):
     """Returns (intercept, slope, V_intercept, V_slope) with sample-variance estimates.
-    VERBATIM from eval_oasst2_pilsd_calibrator.py:90-105 (audit: G1, G5)."""
+    VERBATIM from eval_oasst2_pebs_calibrator.py:90-105."""
     k = len(x)
     if k < 2 or np.var(x) < 1e-12:
         return float(np.mean(y)) if k else 0.0, 0.0, np.inf, np.inf
@@ -411,7 +407,7 @@ def ols_with_V(x: np.ndarray, y: np.ndarray):
 
 
 def kfold_split(n: int, k: int, rng: np.random.Generator):
-    """Random k-fold split. VERBATIM from eval_oasst2_pilsd_calibrator.py:108-120."""
+    """Random k-fold split. VERBATIM from eval_oasst2_pebs_calibrator.py:108-120."""
     idx = np.arange(n)
     rng.shuffle(idx)
     fold_size = n // k
@@ -427,15 +423,15 @@ def kfold_split(n: int, k: int, rng: np.random.Generator):
 
 def cluster_bootstrap_gain_ci(
     sq_err_baseline: np.ndarray,
-    sq_err_pilsd: np.ndarray,
+    sq_err_pebs: np.ndarray,
     per_row_cluster_idx: list,
     B: int = 2000,
     seed: int = 20260420,
 ):
     """Cluster-resample-by-cluster bootstrap on gain_pct. Returns BCa + percentile +
-    jackknife CIs. VERBATIM from eval_oasst2_pilsd_calibrator.py:150-280 with
+    jackknife CIs. VERBATIM from eval_oasst2_pebs_calibrator.py:150-280 with
     user_id -> cluster_id rename."""
-    if len(sq_err_baseline) == 0 or len(sq_err_pilsd) == 0:
+    if len(sq_err_baseline) == 0 or len(sq_err_pebs) == 0:
         return {
             "boot_mean": float("nan"), "boot_sd": float("nan"),
             "ci_percentile_lo": float("nan"), "ci_percentile_hi": float("nan"),
@@ -461,7 +457,7 @@ def cluster_bootstrap_gain_ci(
             continue
         idx_arr = np.array(flat)
         sb = sq_err_baseline[idx_arr]
-        sp = sq_err_pilsd[idx_arr]
+        sp = sq_err_pebs[idx_arr]
         rb = math.sqrt(sb.mean()) if sb.size else 0.0
         rp = math.sqrt(sp.mean()) if sp.size else 0.0
         if rb > 0:
@@ -484,8 +480,8 @@ def cluster_bootstrap_gain_ci(
     pct_hi = float(np.quantile(boot_arr, 0.975))
 
     rmse_base_obs = math.sqrt(sq_err_baseline.mean())
-    rmse_pilsd_obs = math.sqrt(sq_err_pilsd.mean())
-    obs_gain = ((rmse_base_obs - rmse_pilsd_obs) / rmse_base_obs * 100.0
+    rmse_pebs_obs = math.sqrt(sq_err_pebs.mean())
+    obs_gain = ((rmse_base_obs - rmse_pebs_obs) / rmse_base_obs * 100.0
                 if rmse_base_obs > 0 else 0.0)
 
     p_below = float(np.mean(boot_arr < obs_gain))
@@ -499,7 +495,7 @@ def cluster_bootstrap_gain_ci(
         if not flat:
             continue
         sb_jk = sq_err_baseline[np.array(flat)]
-        sp_jk = sq_err_pilsd[np.array(flat)]
+        sp_jk = sq_err_pebs[np.array(flat)]
         rb_jk = math.sqrt(sb_jk.mean()) if sb_jk.size else 0.0
         rp_jk = math.sqrt(sp_jk.mean()) if sp_jk.size else 0.0
         if rb_jk > 0:
@@ -556,7 +552,7 @@ def cluster_bootstrap_gain_ci(
     }
 
 
-def stage_b_pilsd_per_prompt(
+def stage_b_pebs_per_prompt(
     obs_df: pd.DataFrame,
     seed: int = SEED,
     k_folds: int = K_FOLDS,
@@ -564,14 +560,14 @@ def stage_b_pilsd_per_prompt(
     bootstrap_B: int = N_BOOT,
     bootstrap_seed: int = BOOT_SEED,
 ) -> dict:
-    """Run PILSD per-prompt-cluster shrinkage on annotator-rating observations.
+    """Run PEBS per-prompt-cluster shrinkage on annotator-rating observations.
 
     cluster_id = prompt_hash, observation = (response_idx, annotator_slot).
     target y = helpfulness rating (0-4 Likert).
     feature x = RM score (mean-response log-likelihood; replicated across
                 annotators of the same response).
 
-    Pipeline mirrors `eval_oasst2_pilsd_calibrator.py:run_pilsd_oasst2`.
+    Pipeline mirrors `eval_oasst2_pebs_calibrator.py:run_pebs_oasst2`.
     """
     rng = np.random.default_rng(seed)
 
@@ -579,7 +575,7 @@ def stage_b_pilsd_per_prompt(
     n_obs_total = int(len(df))
     n_clusters_total = int(df["prompt_hash"].nunique())
 
-    # G2: sanity check - feature x should NOT be constant within cluster
+    # Sanity check - feature x should NOT be constant within cluster
     # (would force beta degenerate)
     n_per = df.groupby("prompt_hash").size()
     keep_clusters = set(n_per[n_per >= min_obs_per_cluster].index)
@@ -636,7 +632,7 @@ def stage_b_pilsd_per_prompt(
     sq_err_no_calib_per_row = []
     sq_err_baseline_per_row = []
     sq_err_per_user_ols_per_row = []
-    sq_err_pilsd_per_row = []
+    sq_err_pebs_per_row = []
     per_row_cluster = []
     rng2 = np.random.default_rng(seed)
 
@@ -664,31 +660,31 @@ def stage_b_pilsd_per_prompt(
             sq_err_no_calib_per_row.extend(((y_hat_nc - y_te) ** 2).tolist())
             sq_err_baseline_per_row.extend(((y_hat_ps - y_te) ** 2).tolist())
             sq_err_per_user_ols_per_row.extend(((y_hat_ols - y_te) ** 2).tolist())
-            sq_err_pilsd_per_row.extend(((y_hat_sh - y_te) ** 2).tolist())
+            sq_err_pebs_per_row.extend(((y_hat_sh - y_te) ** 2).tolist())
             per_row_cluster.extend([pid] * len(y_te))
 
     sq_err_no_calib_per_row = np.asarray(sq_err_no_calib_per_row)
     sq_err_baseline_per_row = np.asarray(sq_err_baseline_per_row)
     sq_err_per_user_ols_per_row = np.asarray(sq_err_per_user_ols_per_row)
-    sq_err_pilsd_per_row = np.asarray(sq_err_pilsd_per_row)
+    sq_err_pebs_per_row = np.asarray(sq_err_pebs_per_row)
 
     rmse_no_calib = float(np.sqrt(sq_err_no_calib_per_row.mean()))
     rmse_baseline = float(np.sqrt(sq_err_baseline_per_row.mean()))
     rmse_per_user_ols = float(np.sqrt(sq_err_per_user_ols_per_row.mean()))
-    rmse_pilsd = float(np.sqrt(sq_err_pilsd_per_row.mean()))
-    gain_pct = ((rmse_baseline - rmse_pilsd) / rmse_baseline * 100.0
+    rmse_pebs = float(np.sqrt(sq_err_pebs_per_row.mean()))
+    gain_pct = ((rmse_baseline - rmse_pebs) / rmse_baseline * 100.0
                 if rmse_baseline > 0 else float("nan"))
 
     log(f"[stage B] rmse_no_calib   = {rmse_no_calib:.5f}")
     log(f"[stage B] rmse_baseline    = {rmse_baseline:.5f}")
     log(f"[stage B] rmse_per_user_ols= {rmse_per_user_ols:.5f}")
-    log(f"[stage B] rmse_pilsd       = {rmse_pilsd:.5f}")
+    log(f"[stage B] rmse_pebs       = {rmse_pebs:.5f}")
     log(f"[stage B] gain_pct         = {gain_pct:+.3f}%")
 
     # Cluster-bootstrap CI on gain_pct (cluster by prompt_hash)
     log(f"[stage B] cluster-bootstrap B={bootstrap_B} ...")
     bs = cluster_bootstrap_gain_ci(
-        sq_err_baseline_per_row, sq_err_pilsd_per_row, per_row_cluster,
+        sq_err_baseline_per_row, sq_err_pebs_per_row, per_row_cluster,
         B=bootstrap_B, seed=bootstrap_seed,
     )
     log(f"[stage B] BCa CI95: [{bs['ci_bca_lo']:+.3f}, {bs['ci_bca_hi']:+.3f}]")
@@ -716,7 +712,7 @@ def stage_b_pilsd_per_prompt(
         "rmse_no_calib": rmse_no_calib,
         "rmse_baseline_pop": rmse_baseline,
         "rmse_per_user_OLS": rmse_per_user_ols,
-        "rmse_pilsd_shrunk": rmse_pilsd,
+        "rmse_pebs_shrunk": rmse_pebs,
         "gain_pct": float(gain_pct),
         "gain_ci_bca_lo": float(bs.get("ci_bca_lo", float("nan"))),
         "gain_ci_bca_hi": float(bs.get("ci_bca_hi", float("nan"))),
@@ -735,20 +731,20 @@ def stage_b_pilsd_per_prompt(
 
 
 # ============================================================================
-# Verdict-class STRICT (4-class per Q1 brief + Skill: honest-disclosure 6.3)
+# Outcome classification
 # ============================================================================
 
 
 def assign_verdict_class(
     gain: float, ci_lo: float, ci_hi: float, n_clusters: int,
 ) -> str:
-    """4-class STRICT per Q1 brief + Skill: honest-disclosure 6.3.
+    """Pre-specified outcome classification.
 
-    ESTABLISHED-HELPSTEER2-CONFIRMS-PRISM            gain >= +3 + CI excludes 0
+    CONFIRMED-HELPSTEER2-CONFIRMS-PRISM            gain >= +3 + CI excludes 0
                                                       + n_clusters >= 500
-    MODERATE-HELPSTEER2-PARTIAL-CONFIRMS              gain in [+1, +3] + CI excludes 0
-    PRELIMINARY-INCONCLUSIVE-DATASET-SCHEMA-LIMIT     CI straddles zero
-    FALSIFIED-HELPSTEER2-DOES-NOT-REPLICATE           CI strictly negative
+    PARTIAL-HELPSTEER2-PARTIAL-CONFIRMS              gain in [+1, +3] + CI excludes 0
+    TENTATIVE-INCONCLUSIVE-DATASET-SCHEMA-LIMIT     CI straddles zero
+    REJECTED-HELPSTEER2-DOES-NOT-REPLICATE           CI strictly negative
     """
     if not (np.isfinite(gain) and np.isfinite(ci_lo) and np.isfinite(ci_hi)):
         return "INCONCLUSIVE-NaN"
@@ -757,20 +753,20 @@ def assign_verdict_class(
     excludes_zero_neg = ci_hi < 0
 
     if excludes_zero_neg:
-        return "FALSIFIED-HELPSTEER2-DOES-NOT-REPLICATE"
+        return "REJECTED-HELPSTEER2-DOES-NOT-REPLICATE"
     if (gain >= ESTABLISHED_GAIN_LO
             and excludes_zero_pos
             and n_clusters >= N_CLUSTERS_FOR_ESTABLISHED):
-        return "ESTABLISHED-HELPSTEER2-CONFIRMS-PRISM"
+        return "CONFIRMED-HELPSTEER2-CONFIRMS-PRISM"
     if (gain >= MODERATE_GAIN_LO
             and gain < ESTABLISHED_GAIN_LO
             and excludes_zero_pos):
-        return "MODERATE-HELPSTEER2-PARTIAL-CONFIRMS"
+        return "PARTIAL-HELPSTEER2-PARTIAL-CONFIRMS"
     if (gain >= ESTABLISHED_GAIN_LO
             and excludes_zero_pos
             and n_clusters < N_CLUSTERS_FOR_ESTABLISHED):
-        return "MODERATE-HELPSTEER2-PARTIAL-CONFIRMS-COHORT-BELOW-500"
-    return "PRELIMINARY-INCONCLUSIVE-DATASET-SCHEMA-LIMIT"
+        return "PARTIAL-HELPSTEER2-PARTIAL-CONFIRMS-COHORT-BELOW-500"
+    return "TENTATIVE-INCONCLUSIVE-DATASET-SCHEMA-LIMIT"
 
 
 # ============================================================================
@@ -783,7 +779,7 @@ def parse_args():
     p.add_argument(
         "--disagreements-jsonl-gz",
         default="/workspace/.hf_cache/hub/datasets--nvidia--HelpSteer2/snapshots/990b2711a36180dd19d9c94b8627844866f8982a/disagreements/disagreements.jsonl.gz",
-        help="Path to HelpSteer2 disagreements config jsonl.gz on the GPU pod.",
+        help="Path to HelpSteer2 disagreements config jsonl.gz on the GPU host.",
     )
     p.add_argument(
         "--scored-parquet",
@@ -810,7 +806,7 @@ def parse_args():
 
 
 def stage_a_needs_rerun(parquet: Path, force: bool, min_rows: int) -> bool:
-    """G3: re-run Stage A if --force-rescore OR parquet missing OR too small."""
+    """Re-run Stage A if --force-rescore OR parquet missing OR too small."""
     if force:
         return True
     if not parquet.exists():
@@ -838,26 +834,18 @@ def main():
         "k_folds": int(args.k_folds),
         "min_obs_per_cluster": int(args.min_obs_per_cluster),
         "model_id": args.model_id,
-        "skill_citations": [
-            "Skill: research-grade-code-audit-pre-launch v1 G1-G12",
-            "Skill: honest-disclosure SCOPE-not-RETRACT (4-class STRICT)",
-            "Skill: post-experiment-discipline-3-track Step 5+7",
-            "Skill: launch-runpod-h100-job (rtx6000-1)",
-            "Skill: gpu-artifact-sync",
-            "Skill: icml-neurips-critical-reviewer-2026 Pass 5 OOD generalization",
-        ],
-        "honest_disclosure_brief_vs_data_mismatch": (
-            "The Q1 brief assumed an 'annotator_id field' exists in HelpSteer2. "
+        "honest_disclosure_design_vs_data_mismatch": (
+            "The original design assumed an 'annotator_id field' exists in HelpSteer2. "
             "It does not (NVIDIA anonymized annotators across rows; Wang et al. "
             "2024 Section 3.4 explicitly states list-position is not a stable cross-row "
-            "annotator identifier). Closest defensible PILSD analog: "
+            "annotator identifier). Closest defensible PEBS analog: "
             "cluster_id=prompt_hash with (response_idx, annotator_slot) "
             "observations within cluster. n_obs_per_cluster ~6 vs PRISM's median-50 "
-            "-> Morris (1983) eq. 2.9 predicts omega_j -> 0 -> PILSD approx pop-slope "
-            "-> gain magnitude bounded downward. ESTABLISHED outcome (>=3pp + CI "
+            "-> Morris (1983) eq. 2.9 predicts omega_j -> 0 -> PEBS approx pop-slope "
+            "-> gain magnitude bounded downward. CONFIRMED outcome (>=3pp + CI "
             "excludes 0 + n_clusters >= 500) would be a positive surprise; "
-            "MODERATE-PARTIAL (1-3pp + CI excludes 0) is the brief-aligned best case; "
-            "PRELIMINARY-INCONCLUSIVE is the default expectation; FALSIFIED would "
+            "PARTIAL-PARTIAL (1-3pp + CI excludes 0) is the expected best case; "
+            "TENTATIVE-INCONCLUSIVE is the default expectation; REJECTED would "
             "scope-limit the paper claim to per-rater corpora."
         ),
         "anomaly_branches_fired": [],
@@ -941,10 +929,10 @@ def main():
     log(f"[Q1] post-merge: {len(obs_df)} observation rows with rm_score")
 
     # ------------------------------------------------------------------
-    # Stage B - PILSD per-prompt-cluster shrinkage
+    # Stage B - PEBS per-prompt-cluster shrinkage
     # ------------------------------------------------------------------
     try:
-        stage_b_result = stage_b_pilsd_per_prompt(
+        stage_b_result = stage_b_pebs_per_prompt(
             obs_df,
             seed=args.seed,
             k_folds=args.k_folds,
@@ -960,7 +948,7 @@ def main():
         raise
 
     # ------------------------------------------------------------------
-    # Stage B -> verdict-class STRICT
+    # Stage B -> outcome classification
     # ------------------------------------------------------------------
     gain = float(stage_b_result.get("gain_pct", float("nan")))
     ci_lo = float(stage_b_result.get("gain_ci_bca_lo", float("nan")))
@@ -990,14 +978,14 @@ def main():
         "n_clusters_post_filter": n_clusters_post_filter,
         "n_obs_total": n_obs_total,
         "rmse_baseline_pop": float(stage_b_result.get("rmse_baseline_pop", float("nan"))),
-        "rmse_pilsd_shrunk": float(stage_b_result.get("rmse_pilsd_shrunk", float("nan"))),
+        "rmse_pebs_shrunk": float(stage_b_result.get("rmse_pebs_shrunk", float("nan"))),
         "stage_b_full_output": stage_b_result,
         "anomaly_branches_fired": anomalies,
         "git_head_t3_at_run": git_head_t3(),
         "completion_timestamp_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
     })
 
-    # Save per-cluster table separately for downstream paper-trail integration
+    # Save per-cluster table separately for downstream analysis
     per_cluster_path = out_dir / "per_cluster.parquet"
     if isinstance(stage_b_result.get("per_cluster_table"), list):
         per_cluster_df = pd.DataFrame(stage_b_result["per_cluster_table"])
@@ -1011,8 +999,8 @@ def main():
     print(f"=== Q1 HelpSteer2 Cross-Corpus Replication ===")
     print(f"verdict_class                   : {verdict}")
     print(f"n_clusters_post_filter / n_obs  : {n_clusters_post_filter} / {n_obs_total}")
-    print(f"rmse_pop / rmse_pilsd_shrunk    : "
-          f"{summary['rmse_baseline_pop']:.5f} / {summary['rmse_pilsd_shrunk']:.5f}")
+    print(f"rmse_pop / rmse_pebs_shrunk    : "
+          f"{summary['rmse_baseline_pop']:.5f} / {summary['rmse_pebs_shrunk']:.5f}")
     print(f"gain_pct                        : {gain:+.3f}%  CI [{ci_lo:+.3f}, {ci_hi:+.3f}]")
     print(f"anomalies_fired                 : {anomalies}")
     print(f"summary_path                    : {summary_path}")

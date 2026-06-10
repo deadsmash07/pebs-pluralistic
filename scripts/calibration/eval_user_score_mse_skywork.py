@@ -4,14 +4,14 @@ Arms
 ----
 1. no_calib       : predict train-fold mean of score_user (no RM at all)
 2. pop_slope_qwen : α₀ + β₀ · rm_score (pop-OLS on Qwen-7B RM scores)
-3. pilsd_shrunk_qwen : EB-shrunk (α_j, β_j) on Qwen RM  ← existing 8.58% headline
+3. pebs_shrunk_qwen : EB-shrunk (α_j, β_j) on Qwen RM  ← existing 8.58% headline
 4. pop_slope_skywork : α₀ + β₀ · skywork_score (pop-OLS on Skywork 27B)
-5. pilsd_shrunk_skywork : EB-shrunk (α_j, β_j) on Skywork  ← tests "stack PILSD on any RM"
+5. pebs_shrunk_skywork : EB-shrunk (α_j, β_j) on Skywork  ← tests "stack PEBS on any RM"
 
-The 4-arm table requested in the brief is really arms {1, 2, 3, 4}. We add
-arm 5 as well because the paper's key rebuttal framing (risk #2: "PILSD is
+The 4-arm table is really arms {1, 2, 3, 4}. We add
+arm 5 as well because the paper's key rebuttal framing (risk #2: "PEBS is
 orthogonal, stacks on any RM") can only be validated with both a Skywork
-pop-slope AND a Skywork PILSD-shrunk comparison.
+pop-slope AND a Skywork PEBS-shrunk comparison.
 
 Identical k-fold structure, seed, min-obs-per-user, and EB τ estimation
 method as `eval_user_score_mse_shrunk.py` so the Qwen 8.58% number is
@@ -38,9 +38,9 @@ from scipy import stats
 ARMS = [
     "no_calib",
     "pop_slope_qwen",
-    "pilsd_shrunk_qwen",
+    "pebs_shrunk_qwen",
     "pop_slope_skywork",
-    "pilsd_shrunk_skywork",
+    "pebs_shrunk_skywork",
 ]
 
 
@@ -183,27 +183,27 @@ def main():
             yh = pop_a_q + pop_b_q * x_q_te
             sq["pop_slope_qwen"].extend(((yh - y_te) ** 2).tolist())
 
-            # 3. pilsd_shrunk_qwen
+            # 3. pebs_shrunk_qwen
             a, b, Va, Vb = ols_with_V(x_q_tr, y_tr)
             wa = tau_a_q / (tau_a_q + Va) if np.isfinite(Va) else 0.0
             wb = tau_b_q / (tau_b_q + Vb) if np.isfinite(Vb) else 0.0
             a_s_ = wa * a + (1 - wa) * pop_a_q
             b_s_ = wb * b + (1 - wb) * pop_b_q
             yh = a_s_ + b_s_ * x_q_te
-            sq["pilsd_shrunk_qwen"].extend(((yh - y_te) ** 2).tolist())
+            sq["pebs_shrunk_qwen"].extend(((yh - y_te) ** 2).tolist())
 
             # 4. pop_slope_skywork
             yh = pop_a_s + pop_b_s * x_s_te
             sq["pop_slope_skywork"].extend(((yh - y_te) ** 2).tolist())
 
-            # 5. pilsd_shrunk_skywork
+            # 5. pebs_shrunk_skywork
             a, b, Va, Vb = ols_with_V(x_s_tr, y_tr)
             wa = tau_a_s / (tau_a_s + Va) if np.isfinite(Va) else 0.0
             wb = tau_b_s / (tau_b_s + Vb) if np.isfinite(Vb) else 0.0
             a_sh = wa * a + (1 - wa) * pop_a_s
             b_sh = wb * b + (1 - wb) * pop_b_s
             yh = a_sh + b_sh * x_s_te
-            sq["pilsd_shrunk_skywork"].extend(((yh - y_te) ** 2).tolist())
+            sq["pebs_shrunk_skywork"].extend(((yh - y_te) ** 2).tolist())
 
         rows.append({
             "user_id": uid,

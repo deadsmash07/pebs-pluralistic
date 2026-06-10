@@ -3,7 +3,7 @@
 Dataset: `allenai/multipref` on HuggingFace (Miranda et al., "Hybrid Preferences:
 Learning to Route Instances for Human vs. AI Feedback", arXiv:2410.19133).
 
-Schema (verified 2026-04-17):
+Schema:
   - 10,461 comparisons  ×  4 annotations each  =  41,844 annotations
   - 227 unique evaluators (Docker-style names, e.g. `clever_bardeen`)
   - per-annotation timestamp (UTC-naive) + per-aspect preference + confidence

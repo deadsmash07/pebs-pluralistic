@@ -2,10 +2,10 @@
 
 Loads per-user RMSE parquets (Qwen + Skywork arms), computes cluster-level
 (per-user) bootstrap 95% CIs on the mean RMSE, and plots 6 arms:
-  no-calib, pop-slope (Qwen), naive-OLS (Qwen), PILSD-shrunk (Qwen),
-  Skywork pop-slope, Skywork + PILSD-shrunk.
+  no-calib, pop-slope (Qwen), naive-OLS (Qwen), PEBS-shrunk (Qwen),
+  Skywork pop-slope, Skywork + PEBS-shrunk.
 
-The 8.58% headline improvement (pop-slope Qwen -> PILSD-shrunk Qwen) is
+The 8.58% headline improvement (pop-slope Qwen -> PEBS-shrunk Qwen) is
 annotated with a bracket.
 """
 from __future__ import annotations
@@ -68,10 +68,10 @@ def main() -> None:
     arms = [
         ("No calibration",          df_shr["rmse_no_calib"].to_numpy(),   27.13, "#8c8c8c"),
         ("Pop-slope (Qwen)",        df_shr["rmse_pop_slope"].to_numpy(),  25.52, "#4e79a7"),
-        ("Naive OLS (Qwen)",        df_shr["rmse_pilsd_ols"].to_numpy(),  23.73, "#59a14f"),
-        ("PILSD shrunk (Qwen)",     df_shr["rmse_pilsd_shrunk"].to_numpy(),23.33, "#e15759"),
+        ("Naive OLS (Qwen)",        df_shr["rmse_pebs_ols"].to_numpy(),  23.73, "#59a14f"),
+        ("PEBS shrunk (Qwen)",     df_shr["rmse_pebs_shrunk"].to_numpy(),23.33, "#e15759"),
         ("Pop-slope (Skywork)",     None,                                  27.17, "#b07aa1"),
-        ("PILSD shrunk (Skywork)",  None,                                  25.46, "#edc948"),
+        ("PEBS shrunk (Skywork)",  None,                                  25.46, "#edc948"),
     ]
 
     labels, means, los, his, colors = [], [], [], [], []
@@ -111,16 +111,16 @@ def main() -> None:
 
     # Bracket annotation for headline 8.58 % improvement
     y_pop   = y[1]  # Pop-slope Qwen
-    y_pilsd = y[3]  # PILSD-shrunk Qwen
-    x_pop, x_pilsd = 25.52, 23.33
+    y_pebs = y[3]  # PEBS-shrunk Qwen
+    x_pop, x_pebs = 25.52, 23.33
     x_brk = 22.2
-    ax.annotate("", xy=(x_brk, y_pop), xytext=(x_brk, y_pilsd),
+    ax.annotate("", xy=(x_brk, y_pop), xytext=(x_brk, y_pebs),
                 arrowprops=dict(arrowstyle="-", color="#d62728", lw=1.1))
     ax.annotate("", xy=(x_pop, y_pop), xytext=(x_brk, y_pop),
                 arrowprops=dict(arrowstyle="-", color="#d62728", lw=1.1))
-    ax.annotate("", xy=(x_pilsd, y_pilsd), xytext=(x_brk, y_pilsd),
+    ax.annotate("", xy=(x_pebs, y_pebs), xytext=(x_brk, y_pebs),
                 arrowprops=dict(arrowstyle="-", color="#d62728", lw=1.1))
-    ax.text(x_brk - 0.15, (y_pop + y_pilsd) / 2, "-8.58%\n(headline)",
+    ax.text(x_brk - 0.15, (y_pop + y_pebs) / 2, "-8.58%\n(headline)",
             ha="right", va="center", fontsize=9.5, color="#d62728",
             fontweight="bold")
 
@@ -128,7 +128,7 @@ def main() -> None:
     ax.set_axisbelow(True)
 
     plt.tight_layout()
-    plt.savefig(OUT, format="pdf", bbox_inches="tight", metadata={"Creator": "PILSD"})
+    plt.savefig(OUT, format="pdf", bbox_inches="tight", metadata={"Creator": "PEBS"})
     print(f"wrote: {OUT}")
 
 

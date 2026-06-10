@@ -1,4 +1,4 @@
-"""Cross-user calibrator transfer — does PILSD's population calibration generalize
+"""Cross-user calibrator transfer — does PEBS's population calibration generalize
 to users NOT seen during MixedLM REML training?
 
 Research question
@@ -23,8 +23,8 @@ Design
    submitted scores at deployment):
      - no_calib:        ŷ = train_mean_y (a flat constant baseline)
      - pop_slope:       ŷ = α_pop + β_pop · rm_score  (zero-shot MixedLM)
-     - pilsd_zero_shot: SAME as pop_slope  (shrinkage with 0 obs → ω=0 → pop)
-     - pilsd_few_shot(k): fit OLS on the user's first k rows, apply EB
+     - pebs_zero_shot: SAME as pop_slope  (shrinkage with 0 obs → ω=0 → pop)
+     - pebs_few_shot(k): fit OLS on the user's first k rows, apply EB
                          shrinkage ω = τ²/(τ² + V(·)) using pop τ² from
                          REML train fit, score the REMAINING n−k rows.
 4. Report mean / median RMSE per mode across holdout users, Wilcoxon paired
@@ -47,7 +47,7 @@ References
   for new subjects = population mean if unseen).
 - Morris 1983 "Parametric empirical Bayes inference" (τ² transfer).
 - Pinheiro & Bates 2000 §1.4 (Laird-Ware random-effects model).
-- Prior: memory/track1_shrinkage_H2e_upgrade.md (within-user result).
+- Prior: the within-user shrinkage result (H2e).
 """
 from __future__ import annotations
 
@@ -168,8 +168,8 @@ def evaluate_holdout_user(
 ) -> dict:
     """Compute RMSE under every mode for one held-out user.
 
-    - no_calib/pop_slope/pilsd_zero_shot are evaluated on ALL n utterances.
-    - pilsd_few_shot(k) fits OLS on x[:k] / y[:k] and evaluates on x[k:] / y[k:]
+    - no_calib/pop_slope/pebs_zero_shot are evaluated on ALL n utterances.
+    - pebs_few_shot(k) fits OLS on x[:k] / y[:k] and evaluates on x[k:] / y[k:]
       (chronological first-k as the user's "submitted anchor scores").
     """
     n = len(x)
@@ -182,12 +182,12 @@ def evaluate_holdout_user(
     y_hat_pop = alpha_pop + beta_pop * x
     rec["rmse_pop_slope"] = _rmse(y_hat_pop, y)
 
-    # pilsd_zero_shot: identical to pop_slope by ω=0 construction
-    rec["rmse_pilsd_zero_shot"] = rec["rmse_pop_slope"]
+    # pebs_zero_shot: identical to pop_slope by ω=0 construction
+    rec["rmse_pebs_zero_shot"] = rec["rmse_pop_slope"]
 
-    # pilsd_few_shot(k): fit on first k, score last (n-k)
+    # pebs_few_shot(k): fit on first k, score last (n-k)
     for k in ks:
-        col_rmse = f"rmse_pilsd_few_shot_k{k}"
+        col_rmse = f"rmse_pebs_few_shot_k{k}"
         col_oa = f"omega_alpha_k{k}"
         col_ob = f"omega_beta_k{k}"
         if k + 2 > n:
@@ -277,8 +277,8 @@ def main():
 
     pu = pd.DataFrame(per_user)
     print(f"\n=== Holdout RMSE summary ({len(pu)} users) ===")
-    mode_cols = ["rmse_no_calib", "rmse_pop_slope", "rmse_pilsd_zero_shot"] + [
-        f"rmse_pilsd_few_shot_k{k}" for k in ks
+    mode_cols = ["rmse_no_calib", "rmse_pop_slope", "rmse_pebs_zero_shot"] + [
+        f"rmse_pebs_few_shot_k{k}" for k in ks
     ]
     for col in mode_cols:
         vals = pu[col].dropna()
@@ -293,7 +293,7 @@ def main():
     b = pu["rmse_no_calib"].to_numpy()
     comparisons["pop_slope_vs_no_calib"] = paired_stats(a, b)
     for k in ks:
-        col_k = f"rmse_pilsd_few_shot_k{k}"
+        col_k = f"rmse_pebs_few_shot_k{k}"
         comparisons[f"few_shot_k{k}_vs_pop_slope"] = paired_stats(
             pu[col_k].to_numpy(), pu["rmse_pop_slope"].to_numpy(),
         )
@@ -315,7 +315,7 @@ def main():
     ps_improve_pct = 100.0 * (nc_mean - ps_mean) / nc_mean if nc_mean > 0 else float("nan")
     fs_improve_pct = {}
     for k in ks:
-        col_k = f"rmse_pilsd_few_shot_k{k}"
+        col_k = f"rmse_pebs_few_shot_k{k}"
         mv = float(pu[col_k].dropna().mean()) if pu[col_k].notna().any() else float("nan")
         base_mv = float(pu.loc[pu[col_k].notna(), "rmse_pop_slope"].mean()) \
             if pu[col_k].notna().any() else float("nan")
@@ -368,7 +368,7 @@ def main():
     best_k = None
     best_mean = float("inf")
     for k in ks:
-        col_k = f"rmse_pilsd_few_shot_k{k}"
+        col_k = f"rmse_pebs_few_shot_k{k}"
         m = summary["rmse_mean"].get(col_k, float("nan"))
         if not np.isnan(m) and m < best_mean:
             best_mean = m

@@ -1,12 +1,12 @@
-"""Severity / MDE analysis for T1 7B PPO BT-LL audit (iter+N+173).
+"""Severity / MDE analysis for T1 7B PPO BT-LL audit.
 
-Motivation: adversarial-review attack #4 — "2-seed Δ=-3.0e-4, CI ±0.003
+Motivation: a statistical-power concern — "2-seed Δ=-3.0e-4, CI ±0.003
 cannot distinguish theorem-predicted null from a 2nd-order signal ~0.001."
 
 This script computes the minimum detectable effect (MDE) at 80% power for
 n ∈ {2, 3, 5} seeds using the per-seed observed SD on PRISM 500 held-out
 pairs, so the paper can disclose the exact effect size below which our
-test has low power — i.e. convert attack #4 from a rhetorical concern
+test has low power — i.e. convert the concern from a rhetorical one
 into a quantified scope bound.
 
 MDE formula (paired design, normal approx):
@@ -35,7 +35,7 @@ def main():
             print(f"[warn] missing {p}")
             continue
         d = json.loads(p.read_text())
-        deltas.append(d["mean_bt_ll_delta_pilsd_minus_vanilla"])
+        deltas.append(d["mean_bt_ll_delta_pebs_minus_vanilla"])
         per_pair_se.append(d["paired_t_bt_ll"]["se"])
         n_pairs = d["n_eval_pairs"]
     deltas = np.array(deltas)

@@ -5,7 +5,7 @@ Dataset: `stanfordnlp/SHP` on HuggingFace (Ethayarajh, Choi, Swayamdipta 2022,
 preference pairs across 18 `ask*` / `changemyview` / `explainlikeimfive`
 subreddits, collected 2011-02-11 → 2023-01-01 (~12 years).
 
-Schema (verified 2026-04-18):
+Schema:
   post_id         str     Reddit submission id
   domain          str     subreddit_train / _validation / _test
   history         str     Reddit post text (the "question")

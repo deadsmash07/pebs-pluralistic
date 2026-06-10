@@ -2,43 +2,42 @@
 
 Background
 ----------
-The original Q6 (`q6_dpo_downstream_impact.py`, anchor commit `aa2af97`) was run on
-NousResearch/Meta-Llama-3-8B-Instruct and produced verdict
-MODERATE-DPO-PILSD-PARTIAL-DOMINATES with held-out pair-accuracy delta
-+8.81pp [+7.03, +10.64] (single-seed; G3 silent-bypass PASS frac=0.461).
+The original Q6 (`q6_dpo_downstream_impact.py`) was run on
+NousResearch/Meta-Llama-3-8B-Instruct and produced a held-out pair-accuracy delta of
++8.81pp [+7.03, +10.64] (single-seed; silent-bypass guard PASS frac=0.461).
 
 This wrapper extends Q6 to ADDITIONAL backbones (Qwen-2.5-7B-Instruct + Mistral-7B-
-Instruct-v0.3) using the IDENTICAL PRISM-LOCO matched protocol, IDENTICAL PILSD
-calibrators (`prism_user_calibrators_shrunk.parquet`, T1 anchor 9c92523), IDENTICAL
+Instruct-v0.3) using the IDENTICAL PRISM-LOCO matched protocol, IDENTICAL PEBS
+calibrators (`prism_user_calibrators_shrunk.parquet`), IDENTICAL
 DPO hyperparameters, IDENTICAL seed, IDENTICAL data splits. The ONLY thing that
 varies across runs is the BASE MODEL.
 
 Hypothesis
 ----------
-PILSD's gain is reward-side (per-user shrinkage of RM scores; backbone-agnostic).
+PEBS's gain is reward-side (per-user shrinkage of RM scores; backbone-agnostic).
 Therefore the downstream pair-accuracy gain (~+8.8pp on Llama-3-8B) should
 TRANSFER to other backbones. Predicted ~+5-10pp per backbone.
 
 Combined cross-backbone evidence
 --------------------------------
 - 1/3 backbones positive: SCOPE-LIMITED (Llama-specific finding; honest disclosure)
-- 2/3 backbones positive: MODERATE-CROSS-BACKBONE
-- 3/3 backbones positive: ESTABLISHED-CROSS-BACKBONE-DOMINATES
+- 2/3 backbones positive: PARTIAL-CROSS-BACKBONE
+- 3/3 backbones positive: CONFIRMED-CROSS-BACKBONE-DOMINATES
 
-Per-backbone 4-class STRICT verdict assigned by the original
+Per-backbone outcomes assigned by the original
 `assign_verdict()` from `q6_dpo_downstream_impact.py` (verbatim re-use; no
-verdict-logic divergence).
+decision-logic divergence).
 
-EXECUTIVE DECISION rationale (wrapper vs script-modify)
--------------------------------------------------------
+Design rationale (wrapper vs script-modify)
+-------------------------------------------
 Chose (B) WRAPPER because:
-- Original Q6 script `q6_dpo_downstream_impact.py` is anchor-load-bearing for the
+- Original Q6 script `q6_dpo_downstream_impact.py` is load-bearing for the
   Llama-3-8B canonical result. Modifying it risks breaking reproducibility of the
-  existing verdict.
+  existing result.
 - Wrapper imports `main()` from the original script per backbone with a different
   `--base-model-id` and `--output-dir`. ZERO duplication of training/eval logic.
 - Per-backbone output dirs prevent pair-parquet collision.
-- All 12 G-gate properties of the original script (G1-G12) inherit verbatim
+- All design properties of the original script inherit verbatim
   because the underlying training/eval code is unchanged.
 - Cross-backbone aggregation is computed POST-HOC by reading per-backbone
   summary.json files; no shared training state.
@@ -49,28 +48,19 @@ Script architecture
 2. For each model:
    a. Set sys.argv to invoke q6_dpo_downstream_impact.main() with backbone-specific
       base_model_id + output_dir.
-   b. Call q6_dpo_downstream_impact.main() in-process (preserves all G-gate
+   b. Call q6_dpo_downstream_impact.main() in-process (preserves all design
       properties; no subprocess overhead; shares HF cache; one-shot Python).
 3. After all backbones complete, read per-backbone summary.json files and write a
    combined cross-backbone summary at
    `results/track1_q6_cross_backbone_summary/cross_backbone_summary.json`.
 
-NO INTERNAL KILL SWITCHES per user 2026-05-02 12:08 IST.
+NO INTERNAL KILL SWITCHES:
 - No internal time-based abort branches.
 - No silent skip flags that disable an arm.
 - No max-hours upper bound on training.
 - The only non-zero "TIMEOUT" in the inherited script is the AlpacaEval-2 subprocess
   2h judge timeout, which is bypassed by --skip-alpaca-eval (default for this
   cross-backbone run; AE2 deferred to camera-ready).
-
-Skill citations
----------------
-- Skill: research-grade-code-audit-pre-launch v1 G1-G12 (inherited from parent script)
-- Skill: launch-runpod-h100-job (h100_v2_backup setsid+nohup+disown)
-- Skill: gpu-artifact-sync (verdict-landing rsync after completion)
-- Skill: post-experiment-discipline-3-track Step 4-7 (per-backbone addendum)
-- Skill: honest-disclosure 4-class STRICT 6.3 (per-backbone verdict; cross-backbone
-  combined verdict)
 
 Output
 ------
@@ -193,16 +183,16 @@ def run_one_backbone(base_model_id: str, common_args: dict, smoke: bool) -> dict
 
 
 def aggregate_cross_backbone(per_backbone_results: list) -> dict:
-    """Compute combined cross-backbone verdict-class.
+    """Compute the combined cross-backbone outcome.
 
     Combined classes:
-      ESTABLISHED-CROSS-BACKBONE-DOMINATES
-        iff all backbones >= MODERATE positive (pair-acc delta>=+1pp + CI excludes 0)
-      MODERATE-CROSS-BACKBONE-DOMINATES-MAJORITY
-        iff strictly more than half are >= MODERATE positive
-      PRELIMINARY-CROSS-BACKBONE-MIXED
+      CONFIRMED-CROSS-BACKBONE-DOMINATES
+        iff all backbones >= PARTIAL positive (pair-acc delta>=+1pp + CI excludes 0)
+      PARTIAL-CROSS-BACKBONE-DOMINATES-MAJORITY
+        iff strictly more than half are >= PARTIAL positive
+      TENTATIVE-CROSS-BACKBONE-MIXED
         iff some positive + some null + zero strict-negative
-      FALSIFIED-CROSS-BACKBONE-NULL-OR-WORSE
+      REJECTED-CROSS-BACKBONE-NULL-OR-WORSE
         iff zero positive backbones AND >=1 strict-negative
       INCONCLUSIVE-CROSS-BACKBONE-INSUFFICIENT
         iff fewer than 2 backbones produced verdicts (e.g., crashes)
@@ -210,17 +200,17 @@ def aggregate_cross_backbone(per_backbone_results: list) -> dict:
     n_total = len(per_backbone_results)
     n_with_verdict = 0
     pos_classes = (
-        "ESTABLISHED-DPO-PILSD-DOMINATES-DOWNSTREAM",
-        "MODERATE-DPO-PILSD-PARTIAL-DOMINATES",
-        "MODERATE-DPO-PILSD-PARTIAL-DOMINATES-AE2",
+        "CONFIRMED-DPO-PEBS-DOMINATES-DOWNSTREAM",
+        "PARTIAL-DPO-PEBS-PARTIAL-DOMINATES",
+        "PARTIAL-DPO-PEBS-PARTIAL-DOMINATES-AE2",
     )
     neg_classes = (
-        "FALSIFIED-DPO-NEUTRAL-OR-WORSE",
-        "FALSIFIED-DPO-AE2-NEGATIVE",
+        "REJECTED-DPO-NEUTRAL-OR-WORSE",
+        "REJECTED-DPO-AE2-NEGATIVE",
     )
     null_classes = (
-        "PRELIMINARY-INCONCLUSIVE",
-        "PRELIMINARY-INCONCLUSIVE-G3-SILENT-BYPASS-GATE-FAIL",
+        "TENTATIVE-INCONCLUSIVE",
+        "TENTATIVE-INCONCLUSIVE-SILENT-BYPASS-GUARD-FAIL",
     )
     n_pos = n_neg = n_null = n_other = 0
     per_backbone_verdicts = []
@@ -248,15 +238,15 @@ def aggregate_cross_backbone(per_backbone_results: list) -> dict:
     if n_with_verdict < 2:
         combined = "INCONCLUSIVE-CROSS-BACKBONE-INSUFFICIENT"
     elif n_pos == n_with_verdict:
-        combined = "ESTABLISHED-CROSS-BACKBONE-DOMINATES"
+        combined = "CONFIRMED-CROSS-BACKBONE-DOMINATES"
     elif n_pos > (n_with_verdict / 2):
-        combined = "MODERATE-CROSS-BACKBONE-DOMINATES-MAJORITY"
+        combined = "PARTIAL-CROSS-BACKBONE-DOMINATES-MAJORITY"
     elif n_pos == 0 and n_neg >= 1:
-        combined = "FALSIFIED-CROSS-BACKBONE-NULL-OR-WORSE"
+        combined = "REJECTED-CROSS-BACKBONE-NULL-OR-WORSE"
     elif n_pos >= 1 and n_neg == 0:
-        combined = "PRELIMINARY-CROSS-BACKBONE-MIXED"
+        combined = "TENTATIVE-CROSS-BACKBONE-MIXED"
     else:
-        combined = "PRELIMINARY-CROSS-BACKBONE-MIXED"
+        combined = "TENTATIVE-CROSS-BACKBONE-MIXED"
 
     # Pull per-backbone headline pair-accuracy deltas.
     per_backbone_pair_acc = []
@@ -286,28 +276,21 @@ def aggregate_cross_backbone(per_backbone_results: list) -> dict:
         "per_backbone_verdicts": per_backbone_verdicts,
         "per_backbone_pair_acc": per_backbone_pair_acc,
         "interpretation": (
-            "Cross-backbone test of Q6 hypothesis: PILSD-corrected reward "
-            "improves DPO-trained policy's downstream pair-accuracy. PILSD is "
+            "Cross-backbone test of Q6 hypothesis: PEBS-corrected reward "
+            "improves DPO-trained policy's downstream pair-accuracy. PEBS is "
             "reward-side (per-user shrinkage of RM scores; backbone-agnostic), "
             "so per-backbone gains should be SIMILAR to the Llama-3-8B canonical "
-            "(+8.81pp). Combined verdict aggregates per-backbone evidence."
+            "(+8.81pp). The combined outcome aggregates per-backbone evidence."
         ),
-        "skill_citations": [
-            "Skill: research-grade-code-audit-pre-launch v1 G1-G12 (inherited)",
-            "Skill: honest-disclosure 4-class STRICT 6.3 (cross-backbone combined)",
-            "Skill: post-experiment-discipline-3-track Step 4-7",
-            "Skill: launch-runpod-h100-job (h100_v2_backup)",
-            "Skill: gpu-artifact-sync",
-        ],
         "anchors": {
             "q6_llama_canonical": (
-                "MODERATE-DPO-PILSD-PARTIAL-DOMINATES; pair-acc delta +8.81pp "
-                "[+7.03, +10.64]; G3 PASS frac=0.461; SCRIPT commit aa2af97"
+                "pair-acc delta +8.81pp [+7.03, +10.64]; "
+                "silent-bypass guard PASS frac=0.461"
             ),
-            "w_b5_prism_canonical": "ESTABLISHED-COMPOUND-NEEDED canonical=8.55%",
+            "w_b5_prism_canonical": "canonical=8.55%",
             "calibrators_parquet": (
-                "/workspace/1_Causal_RLHF/data/prism_user_calibrators_shrunk.parquet "
-                "(T1 anchor 9c92523; identical for all backbones)"
+                "prism_user_calibrators_shrunk.parquet "
+                "(identical for all backbones)"
             ),
         },
         "honest_disclosure_caveats": [
@@ -317,12 +300,12 @@ def aggregate_cross_backbone(per_backbone_results: list) -> dict:
             "tokenization per its own conventions; both arms within a backbone "
             "use the IDENTICAL chat template, so the within-backbone delta is "
             "template-agnostic.",
-            "PRISM data + PILSD calibrators are reward-side; backbone-agnostic; "
+            "PRISM data + PEBS calibrators are reward-side; backbone-agnostic; "
             "ARM A vs ARM B difference is exclusively in chosen/rejected pair "
             "selection (not in DPO training procedure).",
             "Mistral-7B has tokenizer.pad_token=None natively; the parent "
             "script's `if pad_token is None: pad_token = eos_token` covers this; "
-            "smoke-test verified at G7 stage.",
+            "verified in the quick-run test.",
             "AlpacaEval-2 SKIPPED for cross-backbone (per Llama-canonical run); "
             "downstream signal is per-backbone pair-accuracy on held-out PRISM "
             "users (user-disjoint 20% split per backbone with same seed).",

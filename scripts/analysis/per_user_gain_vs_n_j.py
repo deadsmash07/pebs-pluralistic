@@ -1,7 +1,7 @@
-"""Per-user PILSD gain as a function of per-user observations n_j.
+"""Per-user PEBS gain as a function of per-user observations n_j.
 
 Morris 1983 EB theory predicts the shrinkage weight ω_j = τ²/(τ² + σ²/n_j).
-As n_j grows, ω_j → 1 (PILSD approaches OLS) and the per-user GAIN over
+As n_j grows, ω_j → 1 (PEBS approaches OLS) and the per-user GAIN over
 OLS-pop-slope decays. Testing this *explicitly* on PRISM (1394 users,
 n_j varying 10..~500+) is a second causal check on top of the c-sweep
 already reported in §4.1.
@@ -15,7 +15,7 @@ Outputs:
   results/track1_gain_vs_n_j/figure_gain_vs_n.pdf
 
 Analyses:
-  1. Gain_j = rmse_pop_slope - rmse_pilsd_shrunk (positive = PILSD wins)
+  1. Gain_j = rmse_pop_slope - rmse_pebs_shrunk (positive = PEBS wins)
   2. Spearman rank correlation of Gain_j against -n_j (theory: positive rho)
   3. Bin by n_j quintile, report mean Gain + cluster-bootstrap CI
   4. Overlay Morris 1983 theoretical decay curve
@@ -34,9 +34,9 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 IN = (Path(__file__).resolve().parents[2] / "1_Causal_RLHF/results/track1_user_score_mse_shrunk.parquet")
-OUT_DIR = (Path(__file__).resolve().parents[2] / "3_PILSD_Standalone/results/track1_gain_vs_n_j")
+OUT_DIR = (Path(__file__).resolve().parents[2] / "3_PEBS_Standalone/results/track1_gain_vs_n_j")
 
-TAU2_ALPHA = 111.7  # from REML fit in memory track1_tau_squared_scaling_law.md
+TAU2_ALPHA = 111.7  # from the REML fit of tau^2 on PRISM
 SIGMA2_EPS = 23.47 ** 2
 N_BOOT = 2000
 RNG = 20260420
@@ -47,7 +47,7 @@ def main():
     rng = np.random.default_rng(RNG)
 
     df = pd.read_parquet(IN).copy()
-    df["gain"] = df["rmse_pop_slope"] - df["rmse_pilsd_shrunk"]
+    df["gain"] = df["rmse_pop_slope"] - df["rmse_pebs_shrunk"]
     df = df.dropna(subset=["n", "gain"]).reset_index(drop=True)
     print(f"[load] {len(df)} users, n_j range [{df['n'].min()}, {df['n'].max()}]")
     print(f"[overall] mean gain = {df['gain'].mean():+.4f}, median = {df['gain'].median():+.4f}")
@@ -97,7 +97,7 @@ def main():
                  fmt="o-", color="C0", capsize=4, label="quintile mean ± 95% CI", zorder=5)
     ax1.axhline(0, color="k", lw=0.5, ls="--")
     ax1.set_xlabel(r"per-user observations $n_j$")
-    ax1.set_ylabel(r"Gain = RMSE$_\mathrm{pop}$ $-$ RMSE$_\mathrm{PILSD}$ (higher = better)")
+    ax1.set_ylabel(r"Gain = RMSE$_\mathrm{pop}$ $-$ RMSE$_\mathrm{PEBS}$ (higher = better)")
     ax1.legend(loc="upper right")
     ax1.set_xscale("log")
 
@@ -109,7 +109,7 @@ def main():
     ax2.tick_params(axis="y", labelcolor="C3")
     ax2.legend(loc="lower right")
 
-    fig.suptitle(r"PILSD gain vs per-user $n_j$ — Morris 1983 falsifiability check")
+    fig.suptitle(r"PEBS gain vs per-user $n_j$ — Morris 1983 falsifiability check")
     fig.tight_layout()
     fig.savefig(OUT_DIR / "figure_gain_vs_n.pdf", bbox_inches="tight")
     fig.savefig(OUT_DIR / "figure_gain_vs_n.png", dpi=150, bbox_inches="tight")

@@ -2,9 +2,9 @@
 
 Hypothesis under test
 ---------------------
-PILSD's headline analysis applies a min_obs_per_user >= 6 (or n_j >= 3
+PEBS's headline analysis applies a min_obs_per_user >= 6 (or n_j >= 3
 conversations) filter to retain users with enough data for the per-user
-EB shrinkage to be well-defined. A reviewer Pass-6 attack worth pre-empting:
+EB shrinkage to be well-defined. A natural fairness concern:
 "the filter selectively excludes demographic minorities (e.g. older users
 with low engagement, raters from under-represented regions) and the 8.58%
 gain is therefore not generalisable to the full PRISM population."
@@ -45,21 +45,21 @@ Aggregate axis-level metric:
   total_variation_distance := 0.5 * sum_c |post_share[c] - pre_share[c]|
                                (in [0, 1]; 0 = identical distributions)
 
-Verdict (4-class STRICT vocabulary)
------------------------------------
+Outcome classification
+----------------------
 Let TVD_max = max over axes of total_variation_distance, R_min = min over
 axes/categories of retention[c] (only categories with pre_count >= 10).
 
-  ESTABLISHED-DEMOGRAPHIC-BALANCE-PRESERVED
+  CONFIRMED-DEMOGRAPHIC-BALANCE-PRESERVED
       if  TVD_max < 0.03  AND  R_min > 0.85
 
-  MODERATE-DEMOGRAPHIC-BALANCE-PRESERVED
+  PARTIAL-DEMOGRAPHIC-BALANCE-PRESERVED
       if  0.03 <= TVD_max < 0.06  OR  R_min in [0.75, 0.85]
 
-  PRELIMINARY-INCONCLUSIVE-DEMOGRAPHIC-IMBALANCE
+  TENTATIVE-INCONCLUSIVE-DEMOGRAPHIC-IMBALANCE
       if  TVD_max in [0.06, 0.10]  OR  R_min in [0.50, 0.75]
 
-  FALSIFIED-DEMOGRAPHIC-IMBALANCE-INTRODUCED
+  REJECTED-DEMOGRAPHIC-IMBALANCE-INTRODUCED
       if  TVD_max >= 0.10  OR  R_min < 0.50
 
 Outputs
@@ -82,7 +82,7 @@ import numpy as np
 import pandas as pd
 
 # Paths -----------------------------------------------------------------------
-ROOT = Path(__file__).resolve().parents[2]   # 3_PILSD_Standalone/
+ROOT = Path(__file__).resolve().parents[2]   # 3_PEBS_Standalone/
 T1 = ROOT.parent / "1_Causal_RLHF"
 SCORED = T1 / "data/prism_rm_scored.parquet"
 DEMO = T1 / "data/prism_demographics.parquet"
@@ -110,7 +110,7 @@ MIN_PRE_COUNT_FOR_R_MIN = 10  # category needs >=10 users pre-filter to count
 
 
 # ============================================================================
-# G1 helper — extract dict-keyed sub-fields from PRISM JSON-typed columns
+# Helper — extract dict-keyed sub-fields from PRISM JSON-typed columns
 # ============================================================================
 
 def safe_dict_get(v, key: str):
@@ -146,7 +146,7 @@ def expand_demographic_fields(demo: pd.DataFrame) -> pd.DataFrame:
 
 
 # ============================================================================
-# G2 — main pipeline
+# main pipeline
 # ============================================================================
 
 def compute_filter_membership(scored: pd.DataFrame,
@@ -321,17 +321,17 @@ def run(args):
     print(f"\n[aggregate] TVD_max across axes = {tvd_max:.4f}")
     print(f"[aggregate] R_min across categories (pre>=10) = {r_min:.3f}")
 
-    # Verdict assignment per 4-class STRICT vocabulary
+    # Outcome assignment
     if not (np.isfinite(tvd_max) and np.isfinite(r_min)):
-        verdict = "PRELIMINARY-INCONCLUSIVE-DEMOGRAPHIC-IMBALANCE"
+        verdict = "TENTATIVE-INCONCLUSIVE-DEMOGRAPHIC-IMBALANCE"
     elif tvd_max < 0.03 and r_min > 0.85:
-        verdict = "ESTABLISHED-DEMOGRAPHIC-BALANCE-PRESERVED"
+        verdict = "CONFIRMED-DEMOGRAPHIC-BALANCE-PRESERVED"
     elif tvd_max >= 0.10 or r_min < 0.50:
-        verdict = "FALSIFIED-DEMOGRAPHIC-IMBALANCE-INTRODUCED"
+        verdict = "REJECTED-DEMOGRAPHIC-IMBALANCE-INTRODUCED"
     elif tvd_max >= 0.06 or r_min < 0.75:
-        verdict = "PRELIMINARY-INCONCLUSIVE-DEMOGRAPHIC-IMBALANCE"
+        verdict = "TENTATIVE-INCONCLUSIVE-DEMOGRAPHIC-IMBALANCE"
     else:
-        verdict = "MODERATE-DEMOGRAPHIC-BALANCE-PRESERVED"
+        verdict = "PARTIAL-DEMOGRAPHIC-BALANCE-PRESERVED"
 
     print(f"[verdict] {verdict}")
 
@@ -360,7 +360,7 @@ def run(args):
         "rng_seed": args.seed,
         "runtime_seconds": float(time.time() - t0),
         "honest_disclosure": {
-            "scope": "Audit of the n_obs >= 6 / n_conv >= 3 PILSD filter on "
+            "scope": "Audit of the n_obs >= 6 / n_conv >= 3 PEBS filter on "
                      "PRISM demographic axes; pre-filter users include those "
                      "with no demographic data (study_only and similar).",
             "limitations": [

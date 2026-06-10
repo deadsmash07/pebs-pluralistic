@@ -10,7 +10,7 @@ PluriHarms structure: 100 annotators × ~150 questions × harm_level tag ∈ [0,
 Ratings are continuous 0-100.
 
 Experiment: for each annotator, fit robust regression of (rating ~ harm_level)
-comparing per-user OLS vs PILSD-shrunk, stratified by Harm_Level quartiles.
+comparing per-user OLS vs PEBS-shrunk, stratified by Harm_Level quartiles.
 """
 from __future__ import annotations
 
@@ -21,7 +21,7 @@ import numpy as np
 import pandas as pd
 
 DATA = (Path(__file__).resolve().parents[2] / "1_Causal_RLHF/data/pluriharms_long.parquet")
-OUT = (Path(__file__).resolve().parents[2] / "3_PILSD_Standalone/results/track1_pluriharms_robust")
+OUT = (Path(__file__).resolve().parents[2] / "3_PEBS_Standalone/results/track1_pluriharms_robust")
 N_BOOT = 500
 RNG = 20260420
 
@@ -87,7 +87,7 @@ def main():
         if len(ann_df) < 20:
             continue
         sq_pop = []
-        sq_pilsd = []
+        sq_pebs = []
         for q_held in ann_df["Question_Index"].unique():
             train = ann_df[ann_df["Question_Index"] != q_held]
             test = ann_df[ann_df["Question_Index"] == q_held]
@@ -116,16 +116,16 @@ def main():
             b_s = w_b * b_a + (1 - w_b) * b_pop
 
             pred_pop = a_pop + b_pop * x_te
-            pred_pilsd = a_s + b_s * x_te
+            pred_pebs = a_s + b_s * x_te
             sq_pop.append(float(np.sum((y_te - pred_pop) ** 2)))
-            sq_pilsd.append(float(np.sum((y_te - pred_pilsd) ** 2)))
+            sq_pebs.append(float(np.sum((y_te - pred_pebs) ** 2)))
 
         if not sq_pop:
             continue
         rmse_pop = float(np.sqrt(sum(sq_pop) / len(ann_df)))
-        rmse_pilsd = float(np.sqrt(sum(sq_pilsd) / len(ann_df)))
+        rmse_pebs = float(np.sqrt(sum(sq_pebs) / len(ann_df)))
         if rmse_pop > 1e-6:
-            gain = 100.0 * (rmse_pop - rmse_pilsd) / rmse_pop
+            gain = 100.0 * (rmse_pop - rmse_pebs) / rmse_pop
             per_ann_gains.append(gain)
 
     gains = np.array(per_ann_gains)
@@ -133,7 +133,7 @@ def main():
     boots = np.array([rng.choice(gains, len(gains), replace=True).mean()
                       for _ in range(N_BOOT)])
     lo, hi = np.percentile(boots, [2.5, 97.5])
-    print(f"\n[PluriHarms LOCO-Q per-user PILSD-shrunk vs pop-OLS] "
+    print(f"\n[PluriHarms LOCO-Q per-user PEBS-shrunk vs pop-OLS] "
           f"gain = {mean_gain:+.2f}%  CI [{lo:+.2f}, {hi:+.2f}]")
     print(f"[n_annotators analyzed] {len(gains)}")
 

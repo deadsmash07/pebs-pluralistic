@@ -1,7 +1,7 @@
-"""Per-user preference evaluation for PILSD vs vanilla PPO policies.
+"""Per-user preference evaluation for PEBS vs vanilla PPO policies.
 
 The rationale: pair accuracy on the raw 7B RM judge is monotone-invariant
-under affine calibration, so it cannot separate PILSD-calibrated from
+under affine calibration, so it cannot separate PEBS-calibrated from
 vanilla-trained policies (see track1_pair_accuracy_wrong_metric.md and
 track1_ppo_scaled_result.md).
 
@@ -10,30 +10,30 @@ calibrator (alpha_j, beta_j) as the judge. The idea:
 
     raw_scores = RM(prompt, response)                      # shared 7B RM
     user_score = alpha_j + beta_j * raw_scores             # per-user calibration
-    per-user-delta = user_score[pilsd] - user_score[vanilla]
-    per-user-prefer-pilsd = delta > 0
+    per-user-delta = user_score[pebs] - user_score[vanilla]
+    per-user-prefer-pebs = delta > 0
 
 Then we report:
-  - user-win-rate (fraction of sampled users who prefer PILSD)
+  - user-win-rate (fraction of sampled users who prefer PEBS)
   - per-user reward delta distribution
-  - breakdown by calibrator alpha-magnitude bucket (does PILSD
+  - breakdown by calibrator alpha-magnitude bucket (does PEBS
     differentially help users who are more sensitive to RM score?)
   - Wilson CI on user-win-rate (binomial over users, not prompts)
 
-Because raw_pilsd and raw_vanilla are fixed (given the generations),
+Because raw_pebs and raw_vanilla are fixed (given the generations),
 the per-user preference only depends on the sign of beta_j * (raw_p - raw_v):
 if beta_j > 0 (all 1394 PRISM users have beta_j > 0), then user prefers
-PILSD iff mean(raw_p) > mean(raw_v). But THAT is the population-level
+PEBS iff mean(raw_p) > mean(raw_v). But THAT is the population-level
 raw-RM answer, monotone-invariant under beta.
 
-The sharper test, which IS PILSD-sensitive, is PER-PROMPT aggregation:
+The sharper test, which IS PEBS-sensitive, is PER-PROMPT aggregation:
 for each user, the expected calibrated reward across n_prompts prompts is
 alpha_j + beta_j * mean(raw). The win rate per-user is then mean(raw_p) > mean(raw_v)
 (one boolean per user), which IS just sign(mean(raw_p) - mean(raw_v)) scaled
 by N_users. That gives either ~0% or ~100% user-win-rate, which is a
 degenerate signal.
 
-THE META-POINT: linear per-user calibrators cannot separate PILSD from vanilla
+THE META-POINT: linear per-user calibrators cannot separate PEBS from vanilla
 at the argmax level even when applied per-user. The signal must come from
 (a) user-level reward MAGNITUDE (not argmax), or
 (b) per-prompt bootstrap that reflects prompt-level variance.
@@ -44,7 +44,7 @@ So we report 3 metrics:
       Paired bootstrap over prompts, one delta per user.
 
   M2. Per-user WIN RATE on per-prompt basis:
-      For user j, for each prompt i, user j prefers PILSD on that prompt
+      For user j, for each prompt i, user j prefers PEBS on that prompt
       iff beta_j * (r_p[i] - r_v[i]) > 0. Since beta_j > 0 for all PRISM
       users, this collapses to sign(r_p[i] - r_v[i]) — same across users.
       We report this to DEMONSTRATE the monotone-invariance trap.
@@ -175,8 +175,8 @@ def main():
         default="<DATA_ROOT>/1_Causal_RLHF/results/track1_ppo_scaled/scaled_high/vanilla/policy",
     )
     ap.add_argument(
-        "--pilsd-adapter",
-        default="<DATA_ROOT>/1_Causal_RLHF/results/track1_ppo_scaled/scaled_high/pilsd/policy",
+        "--pebs-adapter",
+        default="<DATA_ROOT>/1_Causal_RLHF/results/track1_ppo_scaled/scaled_high/pebs/policy",
     )
     ap.add_argument(
         "--pairs-parquet",
@@ -268,13 +268,13 @@ def main():
     del pv, pv_base
     torch.cuda.empty_cache()
 
-    print("[load] pilsd policy")
+    print("[load] pebs policy")
     pp_base = AutoModelForCausalLM.from_pretrained(
         args.policy_name, torch_dtype=torch.bfloat16
     ).cuda()
-    pp = PeftModel.from_pretrained(pp_base, args.pilsd_adapter)
+    pp = PeftModel.from_pretrained(pp_base, args.pebs_adapter)
     pp.requires_grad_(False)
-    print("[generate] pilsd")
+    print("[generate] pebs")
     p_resp = generate(
         pp, tok, prompt_texts,
         max_new_tokens=args.response_length,
@@ -297,7 +297,7 @@ def main():
 
     print("[score] vanilla responses")
     v_scores = score(rm, rm_tok, raw_prompts, v_resp, batch_size=args.rm_batch_size)
-    print("[score] pilsd responses")
+    print("[score] pebs responses")
     p_scores = score(rm, rm_tok, raw_prompts, p_resp, batch_size=args.rm_batch_size)
     rm = rm.cpu()
     del rm, rm_base
@@ -337,10 +337,10 @@ def main():
             "beta_j": b,
             "n_observations": int(u["n_observations"]),
             "mean_cal_reward_vanilla": mean_v,
-            "mean_cal_reward_pilsd": mean_p,
-            "delta_pilsd_minus_vanilla": delta,
-            "user_prefers_pilsd": int(delta > 0),
-            "prompt_level_wins_pilsd": prompt_wins_p,
+            "mean_cal_reward_pebs": mean_p,
+            "delta_pebs_minus_vanilla": delta,
+            "user_prefers_pebs": int(delta > 0),
+            "prompt_level_wins_pebs": prompt_wins_p,
             "prompt_level_wins_vanilla": prompt_losses_p,
             "prompt_level_ties": prompt_ties,
         })
@@ -350,16 +350,16 @@ def main():
 
     # ------------- Aggregate metrics -------------
     n_users = len(per_user)
-    n_pref_p = int(per_user["user_prefers_pilsd"].sum())
-    n_pref_v = int(n_users - n_pref_p - (per_user["delta_pilsd_minus_vanilla"] == 0).sum())
-    n_tie = int((per_user["delta_pilsd_minus_vanilla"] == 0).sum())
+    n_pref_p = int(per_user["user_prefers_pebs"].sum())
+    n_pref_v = int(n_users - n_pref_p - (per_user["delta_pebs_minus_vanilla"] == 0).sum())
+    n_tie = int((per_user["delta_pebs_minus_vanilla"] == 0).sum())
 
     # Wilson on user-level win rate (excluding ties)
     user_wr = n_pref_p / max(1, n_pref_p + n_pref_v)
     user_wr_ci = wilson_ci(n_pref_p, n_pref_p + n_pref_v)
 
     # BCa on mean per-user reward delta
-    deltas = per_user["delta_pilsd_minus_vanilla"].values
+    deltas = per_user["delta_pebs_minus_vanilla"].values
     mean_delta = float(np.mean(deltas))
     mean_delta_ci = bca_ci(deltas, stat_fn=np.mean, n_boot=5000, seed=args.seed)
     median_delta = float(np.median(deltas))
@@ -379,27 +379,27 @@ def main():
         if len(sub) == 0:
             bucket_stats[b] = {"n": 0}
             continue
-        s_pref = int(sub["user_prefers_pilsd"].sum())
+        s_pref = int(sub["user_prefers_pebs"].sum())
         s_tot = len(sub)
         bucket_stats[b] = {
             "n": s_tot,
-            "n_prefer_pilsd": s_pref,
+            "n_prefer_pebs": s_pref,
             "win_rate": s_pref / s_tot,
             "win_rate_wilson95": list(wilson_ci(s_pref, s_tot)),
-            "mean_delta": float(sub["delta_pilsd_minus_vanilla"].mean()),
+            "mean_delta": float(sub["delta_pebs_minus_vanilla"].mean()),
             "mean_alpha_j": float(sub["alpha_j"].mean()),
             "mean_beta_j": float(sub["beta_j"].mean()),
         }
 
     # Prompt-level win rate (population raw RM, averaged across users —
     # should collapse to the raw-RM pair accuracy since beta_j > 0 for all)
-    total_prompt_wins_p = int(per_user["prompt_level_wins_pilsd"].sum())
+    total_prompt_wins_p = int(per_user["prompt_level_wins_pebs"].sum())
     total_prompt_wins_v = int(per_user["prompt_level_wins_vanilla"].sum())
     total_prompt_ties = int(per_user["prompt_level_ties"].sum())
     prompt_level_wr = total_prompt_wins_p / max(1, total_prompt_wins_p + total_prompt_wins_v)
 
     # Raw RM summary
-    raw_pilsd_wins = int((p_scores > v_scores).sum())
+    raw_pebs_wins = int((p_scores > v_scores).sum())
     raw_vanilla_wins = int((v_scores > p_scores).sum())
     raw_ties = int((p_scores == v_scores).sum())
 
@@ -423,39 +423,39 @@ def main():
             "top_p": args.top_p,
             "seed": args.seed,
             "vanilla_adapter": args.vanilla_adapter,
-            "pilsd_adapter": args.pilsd_adapter,
+            "pebs_adapter": args.pebs_adapter,
             "rm_adapter": args.rm_adapter_dir,
         },
         # Raw RM side (sanity — should match prior eval since same adapters/slice-style)
         "raw_rm": {
             "mean_raw_vanilla": float(v_scores.mean()),
-            "mean_raw_pilsd": float(p_scores.mean()),
-            "raw_pilsd_wins": raw_pilsd_wins,
+            "mean_raw_pebs": float(p_scores.mean()),
+            "raw_pebs_wins": raw_pebs_wins,
             "raw_vanilla_wins": raw_vanilla_wins,
             "raw_ties": raw_ties,
-            "raw_pilsd_win_rate": raw_pilsd_wins / max(1, raw_pilsd_wins + raw_vanilla_wins),
-            "raw_pilsd_win_rate_wilson95": list(
-                wilson_ci(raw_pilsd_wins, raw_pilsd_wins + raw_vanilla_wins)
+            "raw_pebs_win_rate": raw_pebs_wins / max(1, raw_pebs_wins + raw_vanilla_wins),
+            "raw_pebs_win_rate_wilson95": list(
+                wilson_ci(raw_pebs_wins, raw_pebs_wins + raw_vanilla_wins)
             ),
         },
         # HEADLINE: per-user preference
         "per_user_preference": {
             "n_users": n_users,
-            "n_prefer_pilsd": n_pref_p,
+            "n_prefer_pebs": n_pref_p,
             "n_prefer_vanilla": n_pref_v,
             "n_tie_exact": n_tie,
-            "user_win_rate_pilsd": user_wr,
-            "user_win_rate_pilsd_wilson95": list(user_wr_ci),
+            "user_win_rate_pebs": user_wr,
+            "user_win_rate_pebs_wilson95": list(user_wr_ci),
             "mean_per_user_delta": mean_delta,
             "mean_per_user_delta_bca95": list(mean_delta_ci),
             "median_per_user_delta": median_delta,
         },
         # Prompt-level aggregate (expected to match raw RM, demonstrating invariance)
         "prompt_level_aggregate": {
-            "total_prompt_wins_pilsd": total_prompt_wins_p,
+            "total_prompt_wins_pebs": total_prompt_wins_p,
             "total_prompt_wins_vanilla": total_prompt_wins_v,
             "total_prompt_ties": total_prompt_ties,
-            "prompt_level_win_rate_pilsd": prompt_level_wr,
+            "prompt_level_win_rate_pebs": prompt_level_wr,
         },
         "alpha_bucket_breakdown": bucket_stats,
         "gpu_state_at_end": nvidia,

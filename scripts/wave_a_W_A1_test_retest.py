@@ -1,8 +1,8 @@
-"""W-A1 — F8 test-retest reliability of PILSD's tau_hat^2 on PRISM.
+"""W-A1 — F8 test-retest reliability of PEBS's tau_hat^2 on PRISM.
 
 Hypothesis under test
 ---------------------
-PILSD's headline relies on tau_hat^2_alpha = 115.69 (from
+PEBS's headline relies on tau_hat^2_alpha = 115.69 (from
 results/track1_user_score_mse_shrunk.json, eval_user_score_mse_shrunk.py),
 the between-rater intercept variance after subtracting the average
 within-rater sampling variance E[V_alpha]. The Pluralistic and NeurIPS
@@ -87,15 +87,15 @@ coefficients are over-fit to the user's own data). If SNR_alpha (test-
 retest) > 5x, the paper's tau^2_alpha is robustly dominated by between-
 rater value-pluralism rather than within-rater noise.
 
-Verdict (4-class STRICT vocabulary)
------------------------------------
-  ESTABLISHED-TAU2-DOMINATES-TEST-RETEST
+Outcome classification
+----------------------
+  CONFIRMED-TAU2-DOMINATES-TEST-RETEST
       if  SNR_alpha (test-retest) > 5.0  AND  CI95 lower bound > 5.0
-  MODERATE-TAU2-EXCEEDS-TEST-RETEST
+  PARTIAL-TAU2-EXCEEDS-TEST-RETEST
       if  2.0 < SNR_alpha (test-retest) <= 5.0  OR  CI95 lower bound > 2.0
-  PRELIMINARY-INCONCLUSIVE-TAU2-NEAR-NOISE
+  TENTATIVE-INCONCLUSIVE-TAU2-NEAR-NOISE
       if  CI95 lower bound in [0.5, 2.0]
-  FALSIFIED-TAU2-IS-NOISE
+  REJECTED-TAU2-IS-NOISE
       if  CI95 upper bound < 1.0
 
 Honest-scope caveats baked in:
@@ -144,7 +144,7 @@ import pandas as pd
 from tqdm import tqdm
 
 # Paths -----------------------------------------------------------------------
-ROOT = Path(__file__).resolve().parents[2]   # 3_PILSD_Standalone/
+ROOT = Path(__file__).resolve().parents[2]   # 3_PEBS_Standalone/
 T1 = ROOT.parent / "1_Causal_RLHF"
 SCORED = T1 / "data/prism_rm_scored.parquet"
 HEADLINE_PATH = T1 / "results/track1_user_score_mse_shrunk.json"
@@ -158,7 +158,7 @@ MIN_CELLS_FOR_USER = 1   # need at least 1 within-cell pair to enter V_within
 
 
 # ============================================================================
-# G1 helper — exact OLS per user (re-implements Henderson 1975 / Eq. (1) from
+# Helper — exact OLS per user (re-implements Henderson 1975 / Eq. (1) from
 # eval_user_score_mse_shrunk.py)
 # ============================================================================
 
@@ -199,7 +199,7 @@ def loo_residual_for_cell(g_user: pd.DataFrame, cell_keys: tuple) -> np.ndarray 
 
 
 # ============================================================================
-# G2 — main pipeline: load -> filter -> (V_between, V_within) -> verdict
+# main pipeline: load -> filter -> (V_between, V_within) -> verdict
 # ============================================================================
 
 def run(args):
@@ -233,8 +233,8 @@ def run(args):
         print(f"[smoke] subsampled to {df.user_id.nunique()} users")
 
     # ------------------------------------------------------------------------
-    # Pass 1 — per-user OLS calibrator (matches eval_user_score_mse_shrunk
-    # G1 sec.). Used to residualise within-cell variance.
+    # Pass 1 — per-user OLS calibrator (matches eval_user_score_mse_shrunk).
+    # Used to residualise within-cell variance.
     # ------------------------------------------------------------------------
     user_ols = {}
     for uid, g in df.groupby("user_id"):
@@ -404,16 +404,16 @@ def run(args):
           f"[{ci_lo:.3f}, {ci_hi:.3f}], median {np.median(boots_clean):.3f}")
 
     # ------------------------------------------------------------------------
-    # Verdict assignment per 4-class STRICT vocabulary
+    # Outcome assignment
     # ------------------------------------------------------------------------
     if snr_test_retest > 5.0 and ci_lo > 5.0:
-        verdict = "ESTABLISHED-TAU2-DOMINATES-TEST-RETEST"
+        verdict = "CONFIRMED-TAU2-DOMINATES-TEST-RETEST"
     elif snr_test_retest > 2.0 or ci_lo > 2.0:
-        verdict = "MODERATE-TAU2-EXCEEDS-TEST-RETEST"
+        verdict = "PARTIAL-TAU2-EXCEEDS-TEST-RETEST"
     elif ci_hi < 1.0:
-        verdict = "FALSIFIED-TAU2-IS-NOISE"
+        verdict = "REJECTED-TAU2-IS-NOISE"
     else:
-        verdict = "PRELIMINARY-INCONCLUSIVE-TAU2-NEAR-NOISE"
+        verdict = "TENTATIVE-INCONCLUSIVE-TAU2-NEAR-NOISE"
     print(f"[verdict] {verdict}")
     print(f"[verdict] SNR_test_retest = {snr_test_retest:.3f}  "
           f"CI95 [{ci_lo:.3f}, {ci_hi:.3f}]")

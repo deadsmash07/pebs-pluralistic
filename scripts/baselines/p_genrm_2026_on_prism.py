@@ -1,7 +1,7 @@
 """P-GenRM (Zhang et al. 2026, arXiv:2602.12116, ICLR 2026 Oral) head-to-head
 on PRISM LOCO slice — faithful re-implementation adapted to scalar RM scores.
 
-Reference (as resolved 2026-05-02 via WebFetch + Skill: paper-citation-integrity-audit):
+Reference:
     P-GenRM: Personalized Generative Reward Model with Test-time User-based Scaling.
     Authors: Pinyi Zhang, Ting-En Lin, Yuchuan Wu, Jingyang Chen, Zongqi Wang,
              Hua Yang, Ze Xu, Fei Huang, Kai Zhang, Yongbin Li.
@@ -29,7 +29,7 @@ Why we re-implement instead of running the published checkpoint:
     public end-to-end pipeline that maps PRISM continuous score_user labels
     onto P-GenRM's pipeline. Re-training a personalised generative judge for
     apples-to-apples PRISM RMSE is ~50+ GPU-hours and would not be a
-    P-GenRM-vs-PILSD comparison but a P-GenRM-engineering exercise. Instead
+    P-GenRM-vs-PEBS comparison but a P-GenRM-engineering exercise. Instead
     we follow the same protocol used for the four other neighbours in
     `scripts/neighbor_head_to_head.py` (LoRe, EBPO, PReF, MRM): re-implement
     the CORE METHODOLOGICAL CONTRIBUTION on the PRISM scalar slice.
@@ -92,7 +92,7 @@ Honest scope caveats baked into the script:
 Outputs (mirroring scripts/neighbor_head_to_head.py):
     results/track1_p_genrm_h2h/summary.json      <- methods.{p_genrm_default,
                                                      p_genrm_optimal, p_genrm_low,
-                                                     pilsd_shrunk, pop_slope}
+                                                     pebs_shrunk, pop_slope}
     results/track1_p_genrm_h2h/per_user.parquet  <- per-user RMSE rows
     paper/tables/p_genrm_headtohead_numbers.tex  <- LaTeX table
     paper/figures/fig_p_genrm_headtohead.{pdf,png}
@@ -115,7 +115,7 @@ from sklearn.metrics import silhouette_score
 from tqdm import tqdm
 
 # Paths -----------------------------------------------------------------------
-ROOT = Path(__file__).resolve().parents[3]   # 3_PILSD_Standalone/
+ROOT = Path(__file__).resolve().parents[3]   # 3_PEBS_Standalone/
 T1 = ROOT.parent / "1_Causal_RLHF"
 SCORED = T1 / "data/prism_rm_scored.parquet"
 
@@ -135,7 +135,7 @@ PAPER_DEFAULT_M_N = (8, 4)
 PAPER_OPTIMAL_M_N = (16, 8)
 PAPER_LOW_M_N = (4, 2)
 
-# G1: HONEST shrinkage hyper-priors (mirror paper's lambda_cent, lambda_tr).
+# HONEST shrinkage hyper-priors (mirror paper's lambda_cent, lambda_tr).
 # Since the paper does not pin specific scalar values, we set them so that
 # prototypes with N_p >= 30 get >= 80% own-OLS weight.
 LAMBDA_TR_DEFAULT = 8.0     # transition (toward population prior)
@@ -145,7 +145,7 @@ LAMBDA_CENT_DEFAULT = 0.0   # centring (we set 0 because OLS within-prototype
 
 
 # ============================================================================
-# G1 HELPER — exact-OLS with SE so the audit can verify per-line math
+# Helper — exact-OLS with SE (per-line verifiable math)
 # ============================================================================
 
 def fit_ols_with_se(x: np.ndarray, y: np.ndarray):
@@ -168,7 +168,7 @@ def fit_ols_with_se(x: np.ndarray, y: np.ndarray):
 
 
 # ============================================================================
-# G1 / G2 / G5 — P-GenRM core: persona features
+# P-GenRM core: persona features
 # ============================================================================
 
 def build_persona_features(df: pd.DataFrame) -> tuple[pd.DataFrame, np.ndarray, list[str]]:
@@ -217,7 +217,7 @@ def build_persona_features(df: pd.DataFrame) -> tuple[pd.DataFrame, np.ndarray, 
 
 
 # ============================================================================
-# G1 / G5 — P-GenRM core: K-means prototypes + per-prototype OLS calibrator
+# P-GenRM core: K-means prototypes + per-prototype OLS calibrator
 # ============================================================================
 
 def fit_prototypes_and_calibrators(
@@ -272,7 +272,7 @@ def fit_prototypes_and_calibrators(
 
 
 # ============================================================================
-# G1 / G2 — Dual-granularity: individual + prototype channels
+# Dual-granularity: individual + prototype channels
 # ============================================================================
 
 def predict_individual_channel(x_tr: np.ndarray, y_tr: np.ndarray,
@@ -357,10 +357,10 @@ def method_p_genrm(x_tr: np.ndarray, y_tr: np.ndarray, x_te: np.ndarray,
 
 
 # ============================================================================
-# G1 / G5 — PILSD-shrunk reference (mirrors scripts/neighbor_head_to_head.py)
+# PEBS-shrunk reference (mirrors scripts/neighbor_head_to_head.py)
 # ============================================================================
 
-def method_pilsd_shrunk(x_tr, y_tr, x_te, alpha_pop, beta_pop, tau2_a, tau2_b):
+def method_pebs_shrunk(x_tr, y_tr, x_te, alpha_pop, beta_pop, tau2_a, tau2_b):
     a, b, se_a, se_b = fit_ols_with_se(x_tr, y_tr)
     if not np.isfinite(a):
         return alpha_pop + beta_pop * x_te
@@ -372,10 +372,10 @@ def method_pilsd_shrunk(x_tr, y_tr, x_te, alpha_pop, beta_pop, tau2_a, tau2_b):
 
 
 # ============================================================================
-# G7 — LOCO loop with diagnostic instrumentation
+# LOCO loop with diagnostic instrumentation
 # ============================================================================
 
-METHOD_NAMES = ["pop_slope", "pilsd_shrunk",
+METHOD_NAMES = ["pop_slope", "pebs_shrunk",
                 "p_genrm_low", "p_genrm_default", "p_genrm_optimal"]
 
 
@@ -402,7 +402,7 @@ def run_loco(args):
     persona_pu, P_z, feat_names = build_persona_features(df)
     print(f"[persona] features={feat_names}  P_z shape={P_z.shape}")
 
-    # PILSD MoM tau^2_a, tau^2_b (reference baseline)
+    # PEBS MoM tau^2_a, tau^2_b (reference baseline)
     user_stats = []
     for uid, g in df.groupby("user_id"):
         a, b, sa, sb = fit_ols_with_se(g["rm_score"].to_numpy(),
@@ -414,7 +414,7 @@ def run_loco(args):
     sbs = np.array([s[3] for s in user_stats if np.isfinite(s[3])])
     tau2_a = max(0.0, float(np.var(alphas, ddof=1) - np.mean(sas ** 2)))
     tau2_b = max(0.0, float(np.var(betas, ddof=1) - np.mean(sbs ** 2)))
-    print(f"[pilsd]  tau2_a={tau2_a:.2f}  tau2_b={tau2_b:.4f}")
+    print(f"[pebs]  tau2_a={tau2_a:.2f}  tau2_b={tau2_b:.4f}")
 
     # K sweep + silhouette
     if args.k is not None:
@@ -470,7 +470,7 @@ def run_loco(args):
             y_te = te["score_user"].to_numpy(dtype=np.float64)
             preds = {
                 "pop_slope": alpha_pop + beta_pop * x_te,
-                "pilsd_shrunk": method_pilsd_shrunk(x_tr, y_tr, x_te,
+                "pebs_shrunk": method_pebs_shrunk(x_tr, y_tr, x_te,
                                                      alpha_pop, beta_pop,
                                                      tau2_a, tau2_b),
             }
@@ -559,41 +559,41 @@ def run_loco(args):
             "rmse_reduction_pct_mean": mean_g,
             "rmse_reduction_pct_ci95": [lo, hi],
             "rmse_reduction_pct_se": se,
-            "status": "reimplementation" if m != "pilsd_shrunk" else "reference",
+            "status": "reimplementation" if m != "pebs_shrunk" else "reference",
         }
         print(f"{m:>20s}  {pu[f'rmse_{m}'].mean():8.3f}  "
               f"{mean_g:+9.3f}  [{lo:+6.3f}, {hi:+6.3f}]")
 
-    # Paired delta vs PILSD-shrunk
-    pilsd_gain = pu["gain_pilsd_shrunk_pct"].to_numpy()
-    summary["paired_vs_pilsd"] = {}
+    # Paired delta vs PEBS-shrunk
+    pebs_gain = pu["gain_pebs_shrunk_pct"].to_numpy()
+    summary["paired_vs_pebs"] = {}
     for m in METHOD_NAMES:
-        if m in ("pop_slope", "pilsd_shrunk"):
+        if m in ("pop_slope", "pebs_shrunk"):
             continue
-        diff = pilsd_gain - pu[f"gain_{m}_pct"].to_numpy()
+        diff = pebs_gain - pu[f"gain_{m}_pct"].to_numpy()
         md, lo, hi, se = cluster_boot_ci(diff, args.n_boot, args.seed + 1)
-        summary["paired_vs_pilsd"][m] = {
+        summary["paired_vs_pebs"][m] = {
             "mean_delta_pct": md, "ci95": [lo, hi], "se": se,
-            "pilsd_better": bool(lo > 0),
+            "pebs_better": bool(lo > 0),
         }
         sig = "*" if lo > 0 or hi < 0 else ""
-        print(f"  PILSD - {m:>16s}: {md:+.3f}%  CI [{lo:+.3f}, {hi:+.3f}] {sig}")
+        print(f"  PEBS - {m:>16s}: {md:+.3f}%  CI [{lo:+.3f}, {hi:+.3f}] {sig}")
 
-    # G12 honest-disclosure verdict assignment per 4-class vocabulary
-    pilsd_g_mean = summary["methods"]["pilsd_shrunk"]["rmse_reduction_pct_mean"]
-    pilsd_g_lo = summary["methods"]["pilsd_shrunk"]["rmse_reduction_pct_ci95"][0]
-    pilsd_dom = all(
-        summary["paired_vs_pilsd"][m]["pilsd_better"]
+    # Outcome assignment
+    pebs_g_mean = summary["methods"]["pebs_shrunk"]["rmse_reduction_pct_mean"]
+    pebs_g_lo = summary["methods"]["pebs_shrunk"]["rmse_reduction_pct_ci95"][0]
+    pebs_dom = all(
+        summary["paired_vs_pebs"][m]["pebs_better"]
         for m in ("p_genrm_low", "p_genrm_default", "p_genrm_optimal")
     )
-    if pilsd_g_lo > 0 and pilsd_dom:
-        summary["verdict_class"] = "ESTABLISHED-PILSD-GAIN-DOMINATES-P-GENRM"
-    elif pilsd_g_lo > 0 and not pilsd_dom:
-        summary["verdict_class"] = "MODERATE-PILSD-GAIN-PARITY-WITH-P-GENRM"
-    elif pilsd_g_lo <= 0 and pilsd_dom:
-        summary["verdict_class"] = "PRELIMINARY-INCONCLUSIVE-PILSD-GAIN-CI-INCLUDES-ZERO"
+    if pebs_g_lo > 0 and pebs_dom:
+        summary["verdict_class"] = "CONFIRMED-PEBS-GAIN-DOMINATES-P-GENRM"
+    elif pebs_g_lo > 0 and not pebs_dom:
+        summary["verdict_class"] = "PARTIAL-PEBS-GAIN-PARITY-WITH-P-GENRM"
+    elif pebs_g_lo <= 0 and pebs_dom:
+        summary["verdict_class"] = "TENTATIVE-INCONCLUSIVE-PEBS-GAIN-CI-INCLUDES-ZERO"
     else:
-        summary["verdict_class"] = "FALSIFIED-P-GENRM-DOMINATES-PILSD"
+        summary["verdict_class"] = "REJECTED-P-GENRM-DOMINATES-PEBS"
 
     summary["runtime_seconds"] = float(time.time() - t0)
 
@@ -610,7 +610,7 @@ def run_loco(args):
 
 def write_latex_table(summary: dict, out_path: Path):
     pretty = {
-        "pilsd_shrunk":     ("\\PILSD{} \\emph{(ours)}",
+        "pebs_shrunk":     ("\\PEBS{} \\emph{(ours)}",
                               "Per-user EB-shrunk $(\\alpha_j, \\beta_j)$ affine calibrator",
                               "hierarchical EB"),
         "p_genrm_low":      ("P-GenRM $m{=}4,n{=}2$ \\citep{pgenrm2026}",
@@ -623,7 +623,7 @@ def write_latex_table(summary: dict, out_path: Path):
                               "Paper-optimal test-time scaling",
                               "K-means k=" + str(summary["kmeans"]["k_picked"])),
     }
-    order = ["pilsd_shrunk", "p_genrm_low", "p_genrm_default", "p_genrm_optimal"]
+    order = ["pebs_shrunk", "p_genrm_low", "p_genrm_default", "p_genrm_optimal"]
     lines = []
     lines.append("% P-GenRM (Zhang et al. 2026, ICLR Oral) head-to-head on PRISM.")
     lines.append("% Generated by paper/scripts/baselines/p_genrm_2026_on_prism.py")
@@ -662,7 +662,7 @@ def write_latex_table(summary: dict, out_path: Path):
         meth = summary['methods'][m]
         g = meth['rmse_reduction_pct_mean']
         ci = meth['rmse_reduction_pct_ci95']
-        g_s = f"\\textbf{{{g:+.2f}}}" if m == "pilsd_shrunk" else f"{g:+.2f}"
+        g_s = f"\\textbf{{{g:+.2f}}}" if m == "pebs_shrunk" else f"{g:+.2f}"
         ci_s = f"[{ci[0]:+.2f}, {ci[1]:+.2f}]"
         lines.append(f"{pretty_name} & {recipe} & {tag} & {g_s} & {ci_s} \\\\")
     lines.append("\\bottomrule")
@@ -675,12 +675,12 @@ def write_latex_table(summary: dict, out_path: Path):
 
 
 def write_figure(summary: dict, out_path: Path):
-    pretty = {"pilsd_shrunk": "PILSD (ours)",
+    pretty = {"pebs_shrunk": "PEBS (ours)",
               "p_genrm_low": "P-GenRM m=4,n=2",
               "p_genrm_default": "P-GenRM m=8,n=4",
               "p_genrm_optimal": "P-GenRM m=16,n=8"}
-    order = ["pilsd_shrunk", "p_genrm_low", "p_genrm_default", "p_genrm_optimal"]
-    colors = {"pilsd_shrunk": "#1f77b4",
+    order = ["pebs_shrunk", "p_genrm_low", "p_genrm_default", "p_genrm_optimal"]
+    colors = {"pebs_shrunk": "#1f77b4",
               "p_genrm_low": "#aec7e8",
               "p_genrm_default": "#ff9896",
               "p_genrm_optimal": "#d62728"}
@@ -700,7 +700,7 @@ def write_figure(summary: dict, out_path: Path):
         va = "bottom" if mval >= 0 else "top"
         ax.text(b.get_x() + b.get_width() / 2, label_y, f"{mval:+.2f}%",
                 ha="center", va=va, fontsize=10,
-                fontweight="bold" if order[i] == "pilsd_shrunk" else "normal")
+                fontweight="bold" if order[i] == "pebs_shrunk" else "normal")
     ax.axhline(0, color="gray", lw=0.7, ls="--")
     ax.set_xticks(x)
     ax.set_xticklabels([pretty[m] for m in order], rotation=0, fontsize=10)

@@ -1,6 +1,6 @@
 """F1 — Synthetic-user recovery test.
 
-Pre-registered (iter+N+290) falsifier for PILSD's identifiability claim
+Pre-registered falsifier for PEBS's identifiability claim
 (``empirical-Bayes recovers the true tau^2'' in introduction + section 3.2).
 
 Design
@@ -13,7 +13,7 @@ Generate N_j = 1000 synthetic users. For each user j:
                                   matches the PRISM z-score regime)
     score_ij = alpha_j + beta_j * r_ij + eps_ij, eps_ij ~ N(0, sigma_eps^2)
 
-Apply PILSD's closed-form EB machinery (per-user OLS -> tau^2 MoM -> omega
+Apply PEBS's closed-form EB machinery (per-user OLS -> tau^2 MoM -> omega
 shrinkage) and report:
   (i)  bias + RMSE of recovered (hat_tau2_alpha, hat_tau2_beta)
   (ii) per-user alpha_j / beta_j recovery MSE vs pop-slope (mean-only floor)
@@ -25,7 +25,7 @@ Three priors tested per criterion spec:
 
 Run 100 seeds x 3 priors = 300 synthetic Monte-Carlo draws.
 
-Pre-registered criterion (iter+N+290):
+Pre-registered criterion:
   CONFIRMING:  Gaussian prior recovery bias < 1.5x MoM SE
                AND per-user (alpha, beta) MSE < pop-slope MSE by >= 30%
   FALSIFYING:  hat_tau^2 outside [0.5x, 2x] of true for Gaussian prior
@@ -33,7 +33,7 @@ Pre-registered criterion (iter+N+290):
 
 Outputs
 -------
-results/falsifiers_iter290/F1_synthetic_user_recovery.json
+results/falsifiers/F1_synthetic_user_recovery.json
 """
 from __future__ import annotations
 
@@ -45,7 +45,7 @@ import numpy as np
 import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[2]
-OUT = ROOT / "results/falsifiers_iter290"
+OUT = ROOT / "results/falsifiers"
 
 # Pre-registered constants (calibrated to PRISM-like scale)
 N_USERS = 1000

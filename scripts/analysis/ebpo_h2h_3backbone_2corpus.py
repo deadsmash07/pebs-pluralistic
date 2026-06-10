@@ -1,29 +1,29 @@
-"""EBPO x 3-backbone x 2-corpus head-to-head matrix (iter+N+262).
+"""EBPO x 3-backbone x 2-corpus head-to-head matrix.
 
 Scoop #1 defense: EBPO (arxiv:2602.05165) is the algebraically-closest neighbor
-to PILSD — both use the same omega = tau^2/(tau^2+V) shrinkage identity on
-hierarchical group means. Iter+N+239 (PRISM Qwen-7B) showed PILSD > EBPO by
-+0.48pp RMSE; iter+N+261 (PRISM LoRe slice pair-acc) showed EBPO > PILSD by
+to PEBS — both use the same omega = tau^2/(tau^2+V) shrinkage identity on
+hierarchical group means. The PRISM Qwen-7B head-to-head showed PEBS > EBPO by
++0.48pp RMSE; the PRISM LoRe-slice pair-acc analysis showed EBPO > PEBS by
 +0.66pp because chosen-vs-rejected margins cancel the per-user intercept.
 
 This script expands to the full 3 backbone x 2 corpus matrix with BOTH metrics:
 
   Backbones: {qwen7b, skywork27b, llama32_3b}
   Corpora:   {PRISM, PluriHarms}
-  Methods:   {pop, EBPO, PILSD}
+  Methods:   {pop, EBPO, PEBS}
   Metrics:   {RMSE gain %, pair-accuracy}
 
 Metric details
 --------------
 - RMSE gain %: held-out CV per user
-    - PRISM: leave-one-conversation-out (matches iter+N+239 protocol)
+    - PRISM: leave-one-conversation-out (matches the PRISM LOCO protocol)
     - PluriHarms: 5-fold random split on Question_Index (matches eval script)
   Relative gain vs pop_only: (RMSE_pop - RMSE_method) / RMSE_pop * 100
   Cluster-bootstrap over user_id, n_boot=2000, seed=20260420.
 
 - Pair-accuracy: only defined where preference pairs exist.
     - PRISM: within (user, conversation) expand chosen x rejected pairs from
-      the iter+N+261 slice (users with >=6 conversations); 50/50 train/test
+      the LoRe-style slice (users with >=6 conversations); 50/50 train/test
       conversation split. Pair-acc = mean I[margin(chosen)-margin(rejected)>0]
       under each method's per-user calibrator.
     - PluriHarms: NO PAIRS (ratings are absolute harm scores, not preference
@@ -34,7 +34,7 @@ Method definitions (consistent across cells)
 - pop_only: alpha_pop + beta_pop * x, fit once on train union.
 - EBPO (per neighbor_head_to_head.py): per-user INTERCEPT shrinkage
     S = (sigma2/G)/(sigma2/G + tau2), combined with population slope.
-- PILSD: per-user (alpha_j, beta_j) with EB shrinkage
+- PEBS: per-user (alpha_j, beta_j) with EB shrinkage
     omega_a = tau2_a / (tau2_a + SE(alpha_j)^2)
     omega_b = tau2_b / (tau2_b + SE(beta_j)^2)
   fit via MoM.
@@ -67,7 +67,7 @@ N_BOOT_DEFAULT = 2000
 RNG_DEFAULT = 20260420
 MIN_CONV_PER_USER = 2
 MIN_UTT_PER_USER = 10
-MIN_CONV_PAIR_SLICE = 6  # LoRe-style slice for pair-acc (iter+N+261)
+MIN_CONV_PAIR_SLICE = 6  # LoRe-style slice for pair-acc
 
 # Corpus + backbone configuration
 PRISM_QWEN = T1 / "data/prism_rm_scored.parquet"
@@ -132,7 +132,7 @@ def fit_population_and_taus(df: pd.DataFrame, x_col: str, y_col: str):
     tau2_a = max(0.0, float(np.var(alphas, ddof=1) - np.mean(sas ** 2))) if len(alphas) > 1 else 0.0
     tau2_b = max(0.0, float(np.var(betas, ddof=1) - np.mean(sbs ** 2))) if len(betas) > 1 else 0.0
 
-    # EBPO sigma2 / tau2 on residual-mean scale (iter+N+239 convention)
+    # EBPO sigma2 / tau2 on residual-mean scale (residual-mean convention)
     resid = y - (alpha_pop + beta_pop * x)
     tmp = df.assign(_r=resid)
     user_mean_r = tmp.groupby("user_id")["_r"].mean().to_numpy()
@@ -155,7 +155,7 @@ def predict_pop(x_te, fit):
     return fit["alpha_pop"] + fit["beta_pop"] * x_te
 
 
-def predict_pilsd(x_tr, y_tr, x_te, fit):
+def predict_pebs(x_tr, y_tr, x_te, fit):
     a, b, sa, sb = fit_ols_with_se(x_tr, y_tr)
     if not np.isfinite(a):
         return predict_pop(x_te, fit)
@@ -245,7 +245,7 @@ def run_rmse_cv_prism(df: pd.DataFrame, fit: dict):
     per_user = []
     for uid, g in df.groupby("user_id"):
         conv_ids = g["conversation_id"].unique().tolist()
-        sq_pop, sq_ebpo, sq_pilsd = [], [], []
+        sq_pop, sq_ebpo, sq_pebs = [], [], []
         n_used = 0
         for hc in conv_ids:
             tr = g[g["conversation_id"] != hc]
@@ -258,7 +258,7 @@ def run_rmse_cv_prism(df: pd.DataFrame, fit: dict):
             y_te = te["y"].to_numpy(dtype=np.float64)
             sq_pop.extend(((predict_pop(x_te, fit) - y_te) ** 2).tolist())
             sq_ebpo.extend(((predict_ebpo(x_tr, y_tr, x_te, fit) - y_te) ** 2).tolist())
-            sq_pilsd.extend(((predict_pilsd(x_tr, y_tr, x_te, fit) - y_te) ** 2).tolist())
+            sq_pebs.extend(((predict_pebs(x_tr, y_tr, x_te, fit) - y_te) ** 2).tolist())
             n_used += len(y_te)
         if n_used < MIN_UTT_PER_USER:
             continue
@@ -267,7 +267,7 @@ def run_rmse_cv_prism(df: pd.DataFrame, fit: dict):
             "n_utt": n_used,
             "rmse_pop": float(np.sqrt(np.mean(sq_pop))),
             "rmse_ebpo": float(np.sqrt(np.mean(sq_ebpo))),
-            "rmse_pilsd": float(np.sqrt(np.mean(sq_pilsd))),
+            "rmse_pebs": float(np.sqrt(np.mean(sq_pebs))),
         })
     return pd.DataFrame(per_user)
 
@@ -286,7 +286,7 @@ def run_rmse_cv_pluri(df: pd.DataFrame, fit: dict, k_folds: int = 5,
             continue
         idx = rng.permutation(n)
         folds = np.array_split(idx, k_folds)
-        sq_pop, sq_ebpo, sq_pilsd = [], [], []
+        sq_pop, sq_ebpo, sq_pebs = [], [], []
         for f in range(k_folds):
             test_pos = folds[f]
             train_pos = np.concatenate([folds[j] for j in range(k_folds) if j != f])
@@ -298,13 +298,13 @@ def run_rmse_cv_pluri(df: pd.DataFrame, fit: dict, k_folds: int = 5,
             x_te, y_te = gx[test_pos], gy[test_pos]
             sq_pop.extend(((predict_pop(x_te, fit) - y_te) ** 2).tolist())
             sq_ebpo.extend(((predict_ebpo(x_tr, y_tr, x_te, fit) - y_te) ** 2).tolist())
-            sq_pilsd.extend(((predict_pilsd(x_tr, y_tr, x_te, fit) - y_te) ** 2).tolist())
+            sq_pebs.extend(((predict_pebs(x_tr, y_tr, x_te, fit) - y_te) ** 2).tolist())
         per_user.append({
             "user_id": uid,
             "n_utt": int(n),
             "rmse_pop": float(np.sqrt(np.mean(sq_pop))) if sq_pop else np.nan,
             "rmse_ebpo": float(np.sqrt(np.mean(sq_ebpo))) if sq_ebpo else np.nan,
-            "rmse_pilsd": float(np.sqrt(np.mean(sq_pilsd))) if sq_pilsd else np.nan,
+            "rmse_pebs": float(np.sqrt(np.mean(sq_pebs))) if sq_pebs else np.nan,
         })
     return pd.DataFrame(per_user)
 
@@ -342,7 +342,7 @@ def paired_wilcoxon(a: np.ndarray, b: np.ndarray):
 
 
 # ======================================================================
-# Pair-acc slice (PRISM only, iter+N+261 style)
+# Pair-acc slice (PRISM only, LoRe-style)
 # ======================================================================
 
 def build_prism_pair_slice(df: pd.DataFrame):
@@ -387,7 +387,7 @@ def split_pair_train_test(pairs: pd.DataFrame, seed: int):
 
 
 def pair_acc_prism(pairs_df: pd.DataFrame, seed: int):
-    """Fit PILSD/EBPO/pop on TRAIN half of pairs (stacked chosen+rejected as
+    """Fit PEBS/EBPO/pop on TRAIN half of pairs (stacked chosen+rejected as
     utterance-level obs per user), evaluate pair-acc on TEST half."""
     train_df, test_df = split_pair_train_test(pairs_df, seed)
     # Build utterance-level train table
@@ -402,7 +402,7 @@ def pair_acc_prism(pairs_df: pd.DataFrame, seed: int):
     fit = fit_population_and_taus(train_utt, "x", "y")
 
     # Per-user pair-acc on test half
-    acc_pilsd, acc_ebpo, acc_pop = {}, {}, {}
+    acc_pebs, acc_ebpo, acc_pop = {}, {}, {}
     for uid, g in test_df.groupby("user_id"):
         xc = g["x_chosen"].to_numpy(dtype=np.float64)
         xr = g["x_rejected"].to_numpy(dtype=np.float64)
@@ -410,20 +410,20 @@ def pair_acc_prism(pairs_df: pd.DataFrame, seed: int):
         acc_pop[uid] = float(np.mean(fit["beta_pop"] * (xc - xr) > 0)) if len(xc) else np.nan
         # EBPO: intercept cancels in margin => same ordering as pop-slope
         acc_ebpo[uid] = acc_pop[uid]
-        # PILSD: use per-user train-fit shrunk (alpha, beta)
+        # PEBS: use per-user train-fit shrunk (alpha, beta)
         user_tr = train_utt[train_utt["user_id"] == uid]
         if len(user_tr) < 3:
-            acc_pilsd[uid] = acc_pop[uid]
+            acc_pebs[uid] = acc_pop[uid]
             continue
         a, b, sa, sb = fit_ols_with_se(user_tr["x"].to_numpy(dtype=np.float64),
                                        user_tr["y"].to_numpy(dtype=np.float64))
         if not np.isfinite(a):
-            acc_pilsd[uid] = acc_pop[uid]; continue
+            acc_pebs[uid] = acc_pop[uid]; continue
         w_a = fit["tau2_a"] / (fit["tau2_a"] + sa ** 2 + 1e-12) if np.isfinite(sa) else 0.0
         w_b = fit["tau2_b"] / (fit["tau2_b"] + sb ** 2 + 1e-12) if np.isfinite(sb) else 0.0
         b_s = w_b * b + (1 - w_b) * fit["beta_pop"]
-        acc_pilsd[uid] = float(np.mean(b_s * (xc - xr) > 0)) if len(xc) else np.nan
-    return acc_pilsd, acc_ebpo, acc_pop, len(pairs_df), len(train_df), len(test_df)
+        acc_pebs[uid] = float(np.mean(b_s * (xc - xr) > 0)) if len(xc) else np.nan
+    return acc_pebs, acc_ebpo, acc_pop, len(pairs_df), len(train_df), len(test_df)
 
 
 # ======================================================================
@@ -460,14 +460,14 @@ def run_cell(backbone: str, corpus: str, args, global_seed: int):
     # Gain % vs pop
     per_user["gain_ebpo_pct"] = 100.0 * (per_user["rmse_pop"] -
                                           per_user["rmse_ebpo"]) / per_user["rmse_pop"]
-    per_user["gain_pilsd_pct"] = 100.0 * (per_user["rmse_pop"] -
-                                           per_user["rmse_pilsd"]) / per_user["rmse_pop"]
+    per_user["gain_pebs_pct"] = 100.0 * (per_user["rmse_pop"] -
+                                           per_user["rmse_pebs"]) / per_user["rmse_pop"]
     gain_ebpo = cluster_boot_ci(per_user["gain_ebpo_pct"].to_numpy(),
                                  args.n_boot, global_seed)
-    gain_pilsd = cluster_boot_ci(per_user["gain_pilsd_pct"].to_numpy(),
+    gain_pebs = cluster_boot_ci(per_user["gain_pebs_pct"].to_numpy(),
                                   args.n_boot, global_seed + 1)
-    wilcox_pilsd_ebpo_rmse = paired_wilcoxon(
-        per_user["gain_pilsd_pct"].to_numpy(),
+    wilcox_pebs_ebpo_rmse = paired_wilcoxon(
+        per_user["gain_pebs_pct"].to_numpy(),
         per_user["gain_ebpo_pct"].to_numpy())
 
     # Pair-acc: only PRISM
@@ -475,22 +475,22 @@ def run_cell(backbone: str, corpus: str, args, global_seed: int):
     if corpus == "prism":
         pairs_df = build_prism_pair_slice(df)
         if len(pairs_df) > 0:
-            acc_pilsd, acc_ebpo, acc_pop, n_pairs, n_tr, n_te = \
+            acc_pebs, acc_ebpo, acc_pop, n_pairs, n_tr, n_te = \
                 pair_acc_prism(pairs_df, global_seed)
-            users_common = sorted(set(acc_pilsd) & set(acc_ebpo))
+            users_common = sorted(set(acc_pebs) & set(acc_ebpo))
             if users_common:
-                pil_arr = np.array([acc_pilsd[u] for u in users_common])
+                pil_arr = np.array([acc_pebs[u] for u in users_common])
                 ebpo_arr = np.array([acc_ebpo[u] for u in users_common])
                 pop_arr = np.array([acc_pop[u] for u in users_common])
                 pil_ci = cluster_boot_ci(pil_arr, args.n_boot, global_seed + 2)
                 ebpo_ci = cluster_boot_ci(ebpo_arr, args.n_boot, global_seed + 3)
                 pop_ci = cluster_boot_ci(pop_arr, args.n_boot, global_seed + 4)
-                wilcox_pilsd_ebpo_pa = paired_wilcoxon(pil_arr, ebpo_arr)
+                wilcox_pebs_ebpo_pa = paired_wilcoxon(pil_arr, ebpo_arr)
                 pair_res = dict(
                     n_users=len(users_common), n_pairs=int(n_pairs),
                     n_train=int(n_tr), n_test=int(n_te),
-                    pilsd=pil_ci, ebpo=ebpo_ci, pop=pop_ci,
-                    wilcox_pilsd_vs_ebpo=wilcox_pilsd_ebpo_pa,
+                    pebs=pil_ci, ebpo=ebpo_ci, pop=pop_ci,
+                    wilcox_pebs_vs_ebpo=wilcox_pebs_ebpo_pa,
                 )
 
     out = dict(
@@ -500,25 +500,25 @@ def run_cell(backbone: str, corpus: str, args, global_seed: int):
         rmse_abs=dict(
             pop=float(per_user["rmse_pop"].mean()),
             ebpo=float(per_user["rmse_ebpo"].mean()),
-            pilsd=float(per_user["rmse_pilsd"].mean()),
+            pebs=float(per_user["rmse_pebs"].mean()),
         ),
         rmse_gain_pct=dict(
-            ebpo=gain_ebpo, pilsd=gain_pilsd,
+            ebpo=gain_ebpo, pebs=gain_pebs,
         ),
-        wilcox_pilsd_vs_ebpo_rmse=wilcox_pilsd_ebpo_rmse,
+        wilcox_pebs_vs_ebpo_rmse=wilcox_pebs_ebpo_rmse,
         pair_acc=pair_res,
         runtime_s=float(time.time() - t0),
     )
-    print(f"  RMSE gain%: PILSD={gain_pilsd['mean']:+.2f} "
-          f"[{gain_pilsd['ci95'][0]:+.2f},{gain_pilsd['ci95'][1]:+.2f}] "
+    print(f"  RMSE gain%: PEBS={gain_pebs['mean']:+.2f} "
+          f"[{gain_pebs['ci95'][0]:+.2f},{gain_pebs['ci95'][1]:+.2f}] "
           f"EBPO={gain_ebpo['mean']:+.2f} "
           f"[{gain_ebpo['ci95'][0]:+.2f},{gain_ebpo['ci95'][1]:+.2f}] "
-          f"wilcox p={wilcox_pilsd_ebpo_rmse['p']:.2e}")
+          f"wilcox p={wilcox_pebs_ebpo_rmse['p']:.2e}")
     if pair_res:
-        print(f"  pair-acc: PILSD={pair_res['pilsd']['mean']*100:.2f}% "
+        print(f"  pair-acc: PEBS={pair_res['pebs']['mean']*100:.2f}% "
               f"EBPO={pair_res['ebpo']['mean']*100:.2f}% "
               f"pop={pair_res['pop']['mean']*100:.2f}%  "
-              f"wilcox p={pair_res['wilcox_pilsd_vs_ebpo']['p']:.2e}")
+              f"wilcox p={pair_res['wilcox_pebs_vs_ebpo']['p']:.2e}")
     return out
 
 
@@ -546,20 +546,20 @@ def main():
     pair_deltas = []
     for r in results:
         if "error" in r: continue
-        d_rmse = r["rmse_gain_pct"]["pilsd"]["mean"] - r["rmse_gain_pct"]["ebpo"]["mean"]
+        d_rmse = r["rmse_gain_pct"]["pebs"]["mean"] - r["rmse_gain_pct"]["ebpo"]["mean"]
         rmse_deltas.append(d_rmse)
         if r.get("pair_acc"):
-            d_pa = (r["pair_acc"]["pilsd"]["mean"] - r["pair_acc"]["ebpo"]["mean"]) * 100
+            d_pa = (r["pair_acc"]["pebs"]["mean"] - r["pair_acc"]["ebpo"]["mean"]) * 100
             pair_deltas.append(d_pa)
 
     summary = dict(
         iter="N+262",
         seed=args.seed, n_boot=args.n_boot,
         cells=results,
-        mean_rmse_gain_delta_pilsd_minus_ebpo_pct=float(np.mean(rmse_deltas)) if rmse_deltas else np.nan,
-        mean_pair_acc_delta_pilsd_minus_ebpo_pp=float(np.mean(pair_deltas)) if pair_deltas else np.nan,
-        n_cells_pilsd_wins_rmse=int(sum(d > 0 for d in rmse_deltas)),
-        n_cells_pilsd_wins_pair_acc=int(sum(d > 0 for d in pair_deltas)),
+        mean_rmse_gain_delta_pebs_minus_ebpo_pct=float(np.mean(rmse_deltas)) if rmse_deltas else np.nan,
+        mean_pair_acc_delta_pebs_minus_ebpo_pp=float(np.mean(pair_deltas)) if pair_deltas else np.nan,
+        n_cells_pebs_wins_rmse=int(sum(d > 0 for d in rmse_deltas)),
+        n_cells_pebs_wins_pair_acc=int(sum(d > 0 for d in pair_deltas)),
         n_cells=len(rmse_deltas),
         runtime_s=float(time.time() - t0),
     )
@@ -576,24 +576,24 @@ def main():
             "n_users": r["n_users"], "n_utt": r["n_utt"],
             "rmse_pop": r["rmse_abs"]["pop"],
             "rmse_ebpo": r["rmse_abs"]["ebpo"],
-            "rmse_pilsd": r["rmse_abs"]["pilsd"],
+            "rmse_pebs": r["rmse_abs"]["pebs"],
             "gain_ebpo_pct_mean": r["rmse_gain_pct"]["ebpo"]["mean"],
             "gain_ebpo_pct_lo": r["rmse_gain_pct"]["ebpo"]["ci95"][0],
             "gain_ebpo_pct_hi": r["rmse_gain_pct"]["ebpo"]["ci95"][1],
-            "gain_pilsd_pct_mean": r["rmse_gain_pct"]["pilsd"]["mean"],
-            "gain_pilsd_pct_lo": r["rmse_gain_pct"]["pilsd"]["ci95"][0],
-            "gain_pilsd_pct_hi": r["rmse_gain_pct"]["pilsd"]["ci95"][1],
-            "wilcox_rmse_p": r["wilcox_pilsd_vs_ebpo_rmse"]["p"],
-            "pa_pilsd": r["pair_acc"]["pilsd"]["mean"] if r.get("pair_acc") else np.nan,
+            "gain_pebs_pct_mean": r["rmse_gain_pct"]["pebs"]["mean"],
+            "gain_pebs_pct_lo": r["rmse_gain_pct"]["pebs"]["ci95"][0],
+            "gain_pebs_pct_hi": r["rmse_gain_pct"]["pebs"]["ci95"][1],
+            "wilcox_rmse_p": r["wilcox_pebs_vs_ebpo_rmse"]["p"],
+            "pa_pebs": r["pair_acc"]["pebs"]["mean"] if r.get("pair_acc") else np.nan,
             "pa_ebpo": r["pair_acc"]["ebpo"]["mean"] if r.get("pair_acc") else np.nan,
             "pa_pop": r["pair_acc"]["pop"]["mean"] if r.get("pair_acc") else np.nan,
-            "wilcox_pa_p": r["pair_acc"]["wilcox_pilsd_vs_ebpo"]["p"] if r.get("pair_acc") else np.nan,
+            "wilcox_pa_p": r["pair_acc"]["wilcox_pebs_vs_ebpo"]["p"] if r.get("pair_acc") else np.nan,
         })
     pd.DataFrame(rows).to_parquet(OUT / "per_cell.parquet", index=False)
 
     # Pretty table
     print("\n" + "=" * 80)
-    print("6-cell EBPO vs PILSD head-to-head matrix (iter+N+262)")
+    print("6-cell EBPO vs PEBS head-to-head matrix")
     print("=" * 80)
     print(f"{'backbone':>12s} {'corpus':>10s} {'n_u':>5s} "
           f"{'g_PIL':>8s} {'g_EBPO':>8s} {'Δ_g':>7s} {'w_p':>9s}   "
@@ -602,24 +602,24 @@ def main():
         if "error" in r:
             print(f"{r['backbone']:>12s} {r['corpus']:>10s}  ERROR {r['error']}")
             continue
-        gp = r["rmse_gain_pct"]["pilsd"]["mean"]
+        gp = r["rmse_gain_pct"]["pebs"]["mean"]
         ge = r["rmse_gain_pct"]["ebpo"]["mean"]
         dg = gp - ge
-        wp_rmse = r["wilcox_pilsd_vs_ebpo_rmse"]["p"]
+        wp_rmse = r["wilcox_pebs_vs_ebpo_rmse"]["p"]
         if r.get("pair_acc"):
-            pap = r["pair_acc"]["pilsd"]["mean"] * 100
+            pap = r["pair_acc"]["pebs"]["mean"] * 100
             pae = r["pair_acc"]["ebpo"]["mean"] * 100
             dpa = pap - pae
-            wp_pa = r["pair_acc"]["wilcox_pilsd_vs_ebpo"]["p"]
+            wp_pa = r["pair_acc"]["wilcox_pebs_vs_ebpo"]["p"]
             pa_str = f"{pap:7.2f} {pae:8.2f} {dpa:+7.2f} {wp_pa:9.2e}"
         else:
             pa_str = f"{'n/a':>7s} {'n/a':>8s} {'n/a':>7s} {'n/a':>9s}"
         print(f"{r['backbone']:>12s} {r['corpus']:>10s} {r['n_users']:>5d} "
               f"{gp:+7.2f} {ge:+7.2f} {dg:+7.2f} {wp_rmse:9.2e}   {pa_str}")
-    print(f"\nmean Δ RMSE gain % (PILSD - EBPO) over {summary['n_cells']} cells: "
-          f"{summary['mean_rmse_gain_delta_pilsd_minus_ebpo_pct']:+.3f} pp")
-    print(f"mean Δ pair-acc pp (PILSD - EBPO) over {len(pair_deltas)} pair-acc cells: "
-          f"{summary['mean_pair_acc_delta_pilsd_minus_ebpo_pp']:+.3f} pp")
+    print(f"\nmean Δ RMSE gain % (PEBS - EBPO) over {summary['n_cells']} cells: "
+          f"{summary['mean_rmse_gain_delta_pebs_minus_ebpo_pct']:+.3f} pp")
+    print(f"mean Δ pair-acc pp (PEBS - EBPO) over {len(pair_deltas)} pair-acc cells: "
+          f"{summary['mean_pair_acc_delta_pebs_minus_ebpo_pp']:+.3f} pp")
     print(f"[save] {OUT / 'summary.json'}")
     print(f"[wall-clock] {summary['runtime_s']:.1f}s")
 

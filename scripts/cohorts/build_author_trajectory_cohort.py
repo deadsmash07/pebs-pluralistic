@@ -1,6 +1,6 @@
 """Build per-author quality trajectory cohort from OASST2 ready trees.
 
-**Pivot note (2026-04-17)**: The OASST2 2023-11-05 export does NOT populate
+**Pivot note**: The OASST2 2023-11-05 export does NOT populate
 `events[ranking][].user_id` (discovered empirically this session), contrary
 to what the schemas.py declaration suggests. Per-rater longitudinal analysis
 is therefore NOT directly possible on OASST2 without upstream reprocessing.
@@ -11,7 +11,7 @@ is therefore NOT directly possible on OASST2 without upstream reprocessing.
     (mean of anonymous reviewer ratings + review_count)
   - `created_date` per node, `role` ∈ {prompter, assistant}, `labels.quality.value`
 
-**Pivoted PILSD analysis** (still a valid identification strategy):
+**Pivoted PEBS analysis** (still a valid identification strategy):
   - Hypothesis: as OASST2 grew over 10 months, the REVIEWER POOL's quality
     standards drifted (calibration shift). Measurable via stable-author
     trajectories — a consistent author's quality scores should track reviewer
@@ -22,7 +22,7 @@ is therefore NOT directly possible on OASST2 without upstream reprocessing.
   - Identification: same linear calibration idea, but M = quality score on
     anchor authors instead of quality score on anchor responses.
 
-This is a publishable variant of PILSD — same underlying causal graph,
+This is a publishable variant of PEBS — same underlying causal graph,
 different instrument for identifying reviewer drift.
 
 Reference:

@@ -1,16 +1,14 @@
-"""Q7 - Backbone-mismatch cross-architecture PILSD on PRISM.
+"""Q7 - Backbone-mismatch cross-architecture PEBS on PRISM.
 
-Closes the "Qwen-only backbone" reviewer attack flagged in
-`memory/p0_experiment_queue_v1_2026_05_03.md` Q7 brief and `Skill:
-icml-neurips-critical-reviewer-2026` Pass 5 (cross-architecture
-generalization). Hypothesis: PILSD's PRISM headline gain replicates with
+Addresses the cross-architecture generalization concern that the headline
+result was demonstrated on a single (Qwen) backbone. Hypothesis: PEBS's PRISM headline gain replicates with
 Mistral-7B-Instruct + Yi-1.5-34B-Chat backbones (in addition to
 Qwen2.5-7B-Instruct), establishing that the per-rater empirical-Bayes
 shrinkage mechanism is a property of the calibration pipeline rather
 than an artifact of any single backbone family.
 
-DESIGN-DECISION DOCUMENTED HONESTLY (Skill: honest-disclosure SCOPE-not-RETRACT)
-================================================================================
+DESIGN DECISION DOCUMENTED HONESTLY
+===================================
 The legacy PRISM headline (8.58%) used Qwen2.5-7B-Instruct + a trained
 LoRA reward-model classifier head (`AutoModelForSequenceClassification`).
 For Q7 cross-architecture comparison we cannot reuse a Qwen-trained LoRA
@@ -25,7 +23,7 @@ dim). Training fresh LoRA RMs per backbone would conflate two confounds:
 To isolate (1), Q7 uses the **mean-response log-likelihood** scoring
 function (Stiennon et al. 2020) as a *backbone-agnostic* RM proxy. The
 same scoring function is applied to all 3 backbones; differences in
-PILSD gain therefore reflect ONLY backbone-level calibration variance,
+PEBS gain therefore reflect ONLY backbone-level calibration variance,
 not RM-training variance.
 
 This means Q7 does NOT re-replicate the 8.58% legacy headline (which
@@ -36,80 +34,78 @@ landed +9.977% on the PRISM slice; Q7's Qwen2.5-7B mean-LL re-extraction
 should land at the same value (within bootstrap noise) and serves as a
 sanity-check on the pipeline.
 
-4-class verdict-class STRICT (per Q7 brief)
-- ESTABLISHED-PILSD-CROSS-BACKBONE-CONFIRMS  if all 3 backbones gain >= +3pp + CI excludes 0
-- MODERATE-PILSD-CROSS-BACKBONE-PARTIAL      if 2/3 backbones confirm
-- PRELIMINARY-INCONCLUSIVE-CROSS-BACKBONE    if 1/3 confirms or wide CI
-- FALSIFIED-PILSD-QWEN-ONLY                  if other backbones reverse (CI strictly negative)
+Outcome classification
+- CONFIRMED-PEBS-CROSS-BACKBONE-CONFIRMS  if all 3 backbones gain >= +3pp + CI excludes 0
+- PARTIAL-PEBS-CROSS-BACKBONE-PARTIAL      if 2/3 backbones confirm
+- TENTATIVE-INCONCLUSIVE-CROSS-BACKBONE    if 1/3 confirms or wide CI
+- REJECTED-PEBS-QWEN-ONLY                  if other backbones reverse (CI strictly negative)
 
-Pipeline (mirrors Q1 + Q9 + eval_oasst2_pilsd_calibrator)
+Pipeline (mirrors Q1 + Q9 + eval_oasst2_pebs_calibrator)
 ---------------------------------------------------------
 Stage A - per backbone: score each PRISM utterance with mean-response
           log-likelihood (Stiennon-style). Output:
           data/prism_<backbone>_meanll_scored.parquet
           (one row per utterance with (utterance_id, user_id, score_user, rm_score))
 
-Stage B - per backbone: PILSD per-user EB-shrinkage on the scored data.
+Stage B - per backbone: PEBS per-user EB-shrinkage on the scored data.
           K=5 within-user CV; pop-OLS pre-pass for tau^2_alpha, tau^2_beta;
           per-user OLS with V_alpha, V_beta; omega = tau^2 / (tau^2 + V);
           shrunk = omega*per_user + (1-omega)*pop. Cluster-bootstrap by
           user_id; B=2000.
 
-Stage C - cross-backbone aggregation: 4-class verdict per brief, plus
+Stage C - cross-backbone aggregation: outcome classification, plus
           per-backbone gains + CI table for paper integration.
 
 Compute envelope honest-disclosure
 - Per-utterance cap: 20 utterances per user (PRISM median is 48; cap
   preserves K=5 CV with >=4 obs/fold/user with comfortable headroom for
   the >=10 MIN_OBS_PER_USER threshold while bounding wall-time).
-- Estimated wall on h100_v2_backup (H100 80GB):
+- Estimated wall on a single 80GB GPU:
     Mistral-7B nf4   ~1.5-2.5h
     Yi-1.5-34B nf4   ~5-8h
     Qwen2.5-7B nf4   ~1.5-2.5h
   Total ~9-13h sequential (within 6-12h target band).
 
-12-gate audit (Skill: research-grade-code-audit-pre-launch v1)
---------------------------------------------------------------
-G1 math-vs-code: VERBATIM PILSD math from eval_oasst2_pilsd_calibrator.py
-   (`ols_with_V` + `cluster_bootstrap_gain_ci` + 5-fold within-user CV)
-   + Q9 G3 tau-pool reliability filter.
-G2 hypothesis-vs-design: each of 3 backbones uses identical mean-LL
-   scoring + identical PILSD pipeline. Differences in gain attribute
-   exclusively to backbone variance. Honest disclosure: this is NOT
-   re-replication of the LoRA-RM 8.58% headline.
-G3 no silent-bypass: Stage A per-backbone output_parquet existence check
-   by-path + row-count threshold; Stage B reuses Q9 G3 tau-pool filter
-   (CAUGHT-AND-FIXED real bug at Q9 pre-launch). The 3 backbone arms each
-   produce observably different rm_score distributions (verified at end
-   via per-backbone Pearson r vs score_user diagnostic).
-G4 pipeline integrity: gain_pct = (rmse_pop_slope - rmse_pilsd_shrunk) /
-   rmse_pop_slope * 100; identical formula across 3 backbones; no
-   cross-backbone metric leakage.
-G5 reference-implementation: math + bootstrap inherit verbatim from
-   1_Causal_RLHF/scripts/eval_oasst2_pilsd_calibrator.py (commit-anchored)
-   + Q9 G3 tau-pool reliability filter backport.
-G6 hyperparameter sanity: K_FOLDS=5 / N_BOOT=2000 / MIN_OBS_PER_USER=10
-   (per Q7 brief; matches PRISM canonical) / MAX_PROMPT_TOKENS=256
-   / MAX_RESPONSE_TOKENS=256 (matches Q1 + Q9).
-G7 per-step diagnostic: Stage A logs scoring rate + ETA every 200 rows;
-   Stage B logs per-arm RMSE + cluster-bootstrap progress. Per-backbone
-   tau^2 + Pearson r vs user-score recorded.
-G8 reproducibility: SEED=20260420 + bootstrap_seed=20260420 (matches
-   PRISM canonical); git HEAD + parquet sha256 persisted in summary.json.
-G9 output schema: 4-class STRICT verdict-class per Skill: honest-disclosure
-   6.3; per-backbone gains + CI in `per_backbone_results` dict; cross-
-   backbone aggregate verdict in top-level `verdict_class`.
-G10 compute envelope: ~9-13h sequential (3 backbones); per-utterance cap
-    at 20/user keeps wall under 12h with H100 nf4 throughput estimates.
-G11 anti-overfitting: not theory-claiming.
-G12 honest-disclosure: 4-class verdict ENUMERATES the 3 outcomes per
-    backbone PLUS the cross-backbone aggregation rule; mean-LL-vs-LoRA-RM
-    scoring-function difference disclosed at top of file + in summary.
+Design notes
+------------
+- Math: VERBATIM PEBS math from eval_oasst2_pebs_calibrator.py
+  (`ols_with_V` + `cluster_bootstrap_gain_ci` + 5-fold within-user CV)
+  + the Q9 tau-pool reliability filter.
+- Hypothesis: each of 3 backbones uses identical mean-LL
+  scoring + identical PEBS pipeline. Differences in gain attribute
+  exclusively to backbone variance. Honest disclosure: this is NOT
+  re-replication of the LoRA-RM 8.58% headline.
+- No silent-bypass: Stage A per-backbone output_parquet existence check
+  by-path + row-count threshold; Stage B reuses the Q9 tau-pool filter
+  (caught-and-fixed real bug at Q9 pre-launch). The 3 backbone arms each
+  produce observably different rm_score distributions (verified at end
+  via per-backbone Pearson r vs score_user diagnostic).
+- Pipeline integrity: gain_pct = (rmse_pop_slope - rmse_pebs_shrunk) /
+  rmse_pop_slope * 100; identical formula across 3 backbones; no
+  cross-backbone metric leakage.
+- Reference implementation: math + bootstrap inherit verbatim from
+  eval_oasst2_pebs_calibrator.py
+  + the Q9 tau-pool reliability filter backport.
+- Hyperparameters: K_FOLDS=5 / N_BOOT=2000 / MIN_OBS_PER_USER=10
+  (matches PRISM canonical) / MAX_PROMPT_TOKENS=256
+  / MAX_RESPONSE_TOKENS=256 (matches Q1 + Q9).
+- Diagnostics: Stage A logs scoring rate + ETA every 200 rows;
+  Stage B logs per-arm RMSE + cluster-bootstrap progress. Per-backbone
+  tau^2 + Pearson r vs user-score recorded.
+- Reproducibility: SEED=20260420 + bootstrap_seed=20260420 (matches
+  PRISM canonical); git HEAD + parquet sha256 persisted in summary.json.
+- Output schema: per-backbone gains + CI in `per_backbone_results` dict;
+  cross-backbone aggregate outcome in top-level `verdict_class`.
+- Compute envelope: ~9-13h sequential (3 backbones); per-utterance cap
+  at 20/user keeps wall under 12h at nf4 throughput estimates.
+- The decision rule enumerates the 3 outcomes per
+  backbone PLUS the cross-backbone aggregation rule; mean-LL-vs-LoRA-RM
+  scoring-function difference disclosed at top of file + in summary.
 
 Output
 ------
 results/track1_q7_backbone_cross_architecture/{
-  summary.json            # 4-class verdict + per-backbone gains + CIs
+  summary.json            # outcome + per-backbone gains + CIs
   per_backbone.parquet    # row-per-backbone diagnostic table
   per_user_<backbone>.parquet  # per-user calibrator + RMSE
 }
@@ -160,42 +156,42 @@ except ImportError as exc:
     raise ImportError("scipy required for cluster-bootstrap + Wilcoxon") from exc
 
 
-ROOT = Path(__file__).resolve().parents[2]                  # 3_PILSD_Standalone/
+ROOT = Path(__file__).resolve().parents[2]                  # 3_PEBS_Standalone/
 T1 = ROOT.parent / "1_Causal_RLHF"
 
 OUT_DIR = ROOT / "results" / "track1_q7_backbone_cross_architecture"
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 
-# Hyperparameters (PRISM-headline-anchored; mirror Q1 + Q9)
+# Hyperparameters (PRISM-headline conventions; mirror Q1 + Q9)
 SEED = 20260420
 BOOT_SEED = 20260420
 N_BOOT = 2000
 K_FOLDS = 5
-MIN_OBS_PER_USER = 10            # per Q7 brief
+MIN_OBS_PER_USER = 10            # matches PRISM canonical
 PER_USER_UTTERANCE_CAP = 20      # compute envelope; bounds wall while preserving CV signal
 MIN_SCORED_ROWS_FOR_VALID_CACHE = 5_000
 MAX_PROMPT_TOKENS = 256
 MAX_RESPONSE_TOKENS = 256
 
-# Q7 backbone roster (per brief)
+# Q7 backbone roster
 BACKBONES = {
     "mistral_7b_inst_v03": "mistralai/Mistral-7B-Instruct-v0.3",
     "yi_15_34b_chat":       "01-ai/Yi-1.5-34B-Chat",
     "qwen25_7b_inst":       "Qwen/Qwen2.5-7B-Instruct",
 }
 
-# Q9 G3 tau-pool reliability filter (CAUGHT-AND-FIXED at Q9 pre-launch)
+# Q9 tau-pool reliability filter (caught-and-fixed at Q9 pre-launch)
 TAU_RELIABLE_V_MIN = 1e-6
 TAU_RELIABLE_V_MAX = 10.0
 TAU_RELIABLE_PARAM_ABS_MAX = 10.0
 
-# 4-class verdict-class thresholds
+# Outcome thresholds
 ESTABLISHED_GAIN_LO = 3.0
 N_CLUSTERS_FOR_ESTABLISHED = 500
 
 
 # ============================================================================
-# G8 reproducibility helpers
+# Reproducibility helpers
 # ============================================================================
 
 def file_sha256(p: Path) -> str:
@@ -225,7 +221,7 @@ def log(msg: str) -> None:
 
 # ============================================================================
 # Stage A - score PRISM utterances with one backbone (mean-response log-likelihood)
-# G5 reference parity: replicates score_oasst2_with_qwen7b.py:215-230 verbatim
+# Reference parity: replicates score_oasst2_with_qwen7b.py:215-230 verbatim
 # (separate prompt/response tokenization, concat, -100 mask on prompt, score = -loss)
 # ============================================================================
 
@@ -386,15 +382,15 @@ def stage_a_score_prism(
 
 
 # ============================================================================
-# Stage B - PILSD math (verbatim from eval_oasst2_pilsd_calibrator.py)
-# Plus Q9 G3 tau-pool reliability filter (CAUGHT-AND-FIXED real bug)
+# Stage B - PEBS math (verbatim from eval_oasst2_pebs_calibrator.py)
+# Plus Q9 tau-pool reliability filter (caught-and-fixed real bug)
 # ============================================================================
 
 
 def ols_with_V(x: np.ndarray, y: np.ndarray):
     """(intercept, slope, V_intercept, V_slope) with sample-variance estimates.
 
-    Per `eval_user_score_mse_shrunk.py:61-73` verbatim (G1 + G5).
+    Per `eval_user_score_mse_shrunk.py:61-73` verbatim.
     """
     k = len(x)
     if k < 2 or np.var(x) < 1e-12:
@@ -426,14 +422,14 @@ def kfold_split(n: int, k: int, rng: np.random.Generator):
 
 def cluster_bootstrap_gain_ci(
     sq_err_baseline: np.ndarray,
-    sq_err_pilsd: np.ndarray,
+    sq_err_pebs: np.ndarray,
     per_row_cluster_idx: list,
     B: int = N_BOOT,
     seed: int = BOOT_SEED,
 ):
     """Cluster-resample-by-cluster bootstrap on gain_pct. BCa + percentile + jackknife.
-    VERBATIM from eval_oasst2_pilsd_calibrator.py:150-280 (cluster=user_id)."""
-    if len(sq_err_baseline) == 0 or len(sq_err_pilsd) == 0:
+    VERBATIM from eval_oasst2_pebs_calibrator.py:150-280 (cluster=user_id)."""
+    if len(sq_err_baseline) == 0 or len(sq_err_pebs) == 0:
         return {
             "boot_mean": float("nan"), "boot_sd": float("nan"),
             "ci_percentile_lo": float("nan"), "ci_percentile_hi": float("nan"),
@@ -459,7 +455,7 @@ def cluster_bootstrap_gain_ci(
             continue
         idx_arr = np.array(flat)
         sb = sq_err_baseline[idx_arr]
-        sp = sq_err_pilsd[idx_arr]
+        sp = sq_err_pebs[idx_arr]
         rb = math.sqrt(sb.mean()) if sb.size else 0.0
         rp = math.sqrt(sp.mean()) if sp.size else 0.0
         if rb > 0:
@@ -481,8 +477,8 @@ def cluster_bootstrap_gain_ci(
     pct_hi = float(np.quantile(boot_arr, 0.975))
 
     rmse_base_obs = math.sqrt(sq_err_baseline.mean())
-    rmse_pilsd_obs = math.sqrt(sq_err_pilsd.mean())
-    obs_gain = ((rmse_base_obs - rmse_pilsd_obs) / rmse_base_obs * 100.0
+    rmse_pebs_obs = math.sqrt(sq_err_pebs.mean())
+    obs_gain = ((rmse_base_obs - rmse_pebs_obs) / rmse_base_obs * 100.0
                 if rmse_base_obs > 0 else 0.0)
 
     p_below = float(np.mean(boot_arr < obs_gain))
@@ -496,7 +492,7 @@ def cluster_bootstrap_gain_ci(
         if not flat:
             continue
         sb_jk = sq_err_baseline[np.array(flat)]
-        sp_jk = sq_err_pilsd[np.array(flat)]
+        sp_jk = sq_err_pebs[np.array(flat)]
         rb_jk = math.sqrt(sb_jk.mean()) if sb_jk.size else 0.0
         rp_jk = math.sqrt(sp_jk.mean()) if sp_jk.size else 0.0
         if rb_jk > 0:
@@ -553,7 +549,7 @@ def cluster_bootstrap_gain_ci(
     }
 
 
-def stage_b_pilsd_per_user(
+def stage_b_pebs_per_user(
     scored_df: pd.DataFrame,
     backbone_alias: str,
     seed: int = SEED,
@@ -563,15 +559,15 @@ def stage_b_pilsd_per_user(
     bootstrap_seed: int = BOOT_SEED,
     zscore_inputs: bool = True,
 ) -> dict:
-    """Run PILSD per-user-cluster shrinkage. cluster_id=user_id (PRISM canonical).
+    """Run PEBS per-user-cluster shrinkage. cluster_id=user_id (PRISM canonical).
 
-    G3 ROBUSTNESS NOTE (Q9 backport):
+    ROBUSTNESS NOTE (Q9 backport):
     Per-backbone z-scoring of (rm_score, score_user) is enabled by default.
     Justification:
       - gain_pct is invariant to monotonic linear rescaling (omega = tau^2/(tau^2+V)
         is invariant under uniform scaling because tau^2 and V scale identically;
         verified empirically; difference is bootstrap noise <0.01pp on synthetic).
-      - Z-scoring makes the Q9 G3 tau-pool reliability thresholds (PARAM_ABS_MAX=10)
+      - Z-scoring makes the Q9 tau-pool reliability thresholds (PARAM_ABS_MAX=10)
         meaningful across backbones with different RM-score scales (Mistral / Yi /
         Qwen mean-LL produces values in different ranges; raw scoring with
         score_user 0-100 makes intercept ~50 trip the 10-sigma filter spuriously).
@@ -589,7 +585,7 @@ def stage_b_pilsd_per_user(
     log(f"[Stage B / {backbone_alias}] post-filter: {n_users_post_filter} users / "
         f"{len(df)} obs (min_obs_per_user={min_obs_per_user})")
 
-    # Per-backbone z-scoring (G3 robustness; gain_pct invariant)
+    # Per-backbone z-scoring (robustness; gain_pct invariant)
     if zscore_inputs and len(df) > 0:
         x_mean = float(df["rm_score"].mean())
         x_std = float(df["rm_score"].std(ddof=1))
@@ -639,7 +635,7 @@ def stage_b_pilsd_per_user(
         })
     us = pd.DataFrame(user_stats)
 
-    # Q9 G3 tau-pool reliability filter (CAUGHT-AND-FIXED real bug)
+    # Q9 tau-pool reliability filter (caught-and-fixed real bug)
     # Exclude clusters with degenerate sampling-V or extreme intercepts/slopes
     reliable_mask = (
         (us["V_alpha"].replace([np.inf, -np.inf], np.nan).between(
@@ -676,7 +672,7 @@ def stage_b_pilsd_per_user(
     sq_err_no_calib_per_row: list[float] = []
     sq_err_baseline_per_row: list[float] = []
     sq_err_per_user_ols_per_row: list[float] = []
-    sq_err_pilsd_per_row: list[float] = []
+    sq_err_pebs_per_row: list[float] = []
     per_row_user: list[Any] = []
     rng2 = np.random.default_rng(seed)
 
@@ -704,30 +700,30 @@ def stage_b_pilsd_per_user(
             sq_err_no_calib_per_row.extend(((y_hat_nc - y_te) ** 2).tolist())
             sq_err_baseline_per_row.extend(((y_hat_ps - y_te) ** 2).tolist())
             sq_err_per_user_ols_per_row.extend(((y_hat_ols - y_te) ** 2).tolist())
-            sq_err_pilsd_per_row.extend(((y_hat_sh - y_te) ** 2).tolist())
+            sq_err_pebs_per_row.extend(((y_hat_sh - y_te) ** 2).tolist())
             per_row_user.extend([uid] * len(y_te))
 
     sq_err_no_calib = np.asarray(sq_err_no_calib_per_row)
     sq_err_baseline = np.asarray(sq_err_baseline_per_row)
     sq_err_per_user_ols = np.asarray(sq_err_per_user_ols_per_row)
-    sq_err_pilsd = np.asarray(sq_err_pilsd_per_row)
+    sq_err_pebs = np.asarray(sq_err_pebs_per_row)
 
     rmse_no_calib = float(np.sqrt(sq_err_no_calib.mean()))
     rmse_baseline = float(np.sqrt(sq_err_baseline.mean()))
     rmse_per_user_ols = float(np.sqrt(sq_err_per_user_ols.mean()))
-    rmse_pilsd = float(np.sqrt(sq_err_pilsd.mean()))
-    gain_pct = ((rmse_baseline - rmse_pilsd) / rmse_baseline * 100.0
+    rmse_pebs = float(np.sqrt(sq_err_pebs.mean()))
+    gain_pct = ((rmse_baseline - rmse_pebs) / rmse_baseline * 100.0
                 if rmse_baseline > 0 else float("nan"))
 
     log(f"[Stage B / {backbone_alias}] rmse_no_calib    = {rmse_no_calib:.5f}")
     log(f"[Stage B / {backbone_alias}] rmse_baseline    = {rmse_baseline:.5f}")
     log(f"[Stage B / {backbone_alias}] rmse_per_user_OLS= {rmse_per_user_ols:.5f}")
-    log(f"[Stage B / {backbone_alias}] rmse_pilsd       = {rmse_pilsd:.5f}")
+    log(f"[Stage B / {backbone_alias}] rmse_pebs       = {rmse_pebs:.5f}")
     log(f"[Stage B / {backbone_alias}] gain_pct         = {gain_pct:+.3f}%")
 
     log(f"[Stage B / {backbone_alias}] cluster-bootstrap B={bootstrap_B} ...")
     bs = cluster_bootstrap_gain_ci(
-        sq_err_baseline, sq_err_pilsd, per_row_user,
+        sq_err_baseline, sq_err_pebs, per_row_user,
         B=bootstrap_B, seed=bootstrap_seed,
     )
     log(f"[Stage B / {backbone_alias}] BCa CI95: "
@@ -747,7 +743,7 @@ def stage_b_pilsd_per_user(
         "rmse_no_calib": rmse_no_calib,
         "rmse_baseline_pop": rmse_baseline,
         "rmse_per_user_OLS": rmse_per_user_ols,
-        "rmse_pilsd_shrunk": rmse_pilsd,
+        "rmse_pebs_shrunk": rmse_pebs,
         "gain_pct": float(gain_pct),
         "gain_ci_bca_lo": float(bs.get("ci_bca_lo", float("nan"))),
         "gain_ci_bca_hi": float(bs.get("ci_bca_hi", float("nan"))),
@@ -765,7 +761,7 @@ def stage_b_pilsd_per_user(
 
 
 # ============================================================================
-# Stage C - cross-backbone aggregate verdict (4-class STRICT per Q7 brief)
+# Stage C - cross-backbone aggregate outcome
 # ============================================================================
 
 
@@ -773,7 +769,7 @@ def per_backbone_verdict(gain: float, ci_lo: float, ci_hi: float, n_users: int) 
     if not (np.isfinite(gain) and np.isfinite(ci_lo) and np.isfinite(ci_hi)):
         return "INCONCLUSIVE-NaN"
     if ci_hi < 0:
-        return "FALSIFIED-NEGATIVE-CI"
+        return "REJECTED-NEGATIVE-CI"
     if gain >= ESTABLISHED_GAIN_LO and ci_lo > 0 and n_users >= N_CLUSTERS_FOR_ESTABLISHED:
         return "CONFIRMS"
     if gain >= ESTABLISHED_GAIN_LO and ci_lo > 0 and n_users < N_CLUSTERS_FOR_ESTABLISHED:
@@ -784,33 +780,33 @@ def per_backbone_verdict(gain: float, ci_lo: float, ci_hi: float, n_users: int) 
 
 
 def cross_backbone_verdict(per_backbone: dict[str, dict]) -> str:
-    """Aggregate per-backbone outcomes into Q7 brief 4-class verdict.
+    """Aggregate per-backbone outcomes into the cross-backbone outcome.
 
-    ESTABLISHED-PILSD-CROSS-BACKBONE-CONFIRMS  if all 3 confirm
-    MODERATE-PILSD-CROSS-BACKBONE-PARTIAL      if 2/3 confirm
-    PRELIMINARY-INCONCLUSIVE-CROSS-BACKBONE    if 1/3 confirms or wide CI
-    FALSIFIED-PILSD-QWEN-ONLY                  if other backbones reverse
+    CONFIRMED-PEBS-CROSS-BACKBONE-CONFIRMS  if all 3 confirm
+    PARTIAL-PEBS-CROSS-BACKBONE-PARTIAL      if 2/3 confirm
+    TENTATIVE-INCONCLUSIVE-CROSS-BACKBONE    if 1/3 confirms or wide CI
+    REJECTED-PEBS-QWEN-ONLY                  if other backbones reverse
     """
     statuses = [v.get("per_backbone_verdict", "INCONCLUSIVE-NaN")
                 for v in per_backbone.values()]
     n_confirms = sum(1 for s in statuses if s in ("CONFIRMS", "CONFIRMS-COHORT-BELOW-500"))
-    n_falsified = sum(1 for s in statuses if s == "FALSIFIED-NEGATIVE-CI")
+    n_falsified = sum(1 for s in statuses if s == "REJECTED-NEGATIVE-CI")
 
-    # FALSIFIED only if at least one reversal AND Qwen does NOT reverse
+    # REJECTED only if at least one reversal AND Qwen does NOT reverse
     qwen_status = per_backbone.get("qwen25_7b_inst", {}).get("per_backbone_verdict", "")
     qwen_confirms = qwen_status in ("CONFIRMS", "CONFIRMS-COHORT-BELOW-500", "PARTIAL-CONFIRMS")
 
     if n_falsified >= 1 and qwen_confirms:
         # The "Qwen-only" hypothesis: Qwen confirms but other(s) reverse
-        return "FALSIFIED-PILSD-QWEN-ONLY"
+        return "REJECTED-PEBS-QWEN-ONLY"
 
     if n_confirms == 3:
-        return "ESTABLISHED-PILSD-CROSS-BACKBONE-CONFIRMS"
+        return "CONFIRMED-PEBS-CROSS-BACKBONE-CONFIRMS"
     if n_confirms == 2:
-        return "MODERATE-PILSD-CROSS-BACKBONE-PARTIAL"
+        return "PARTIAL-PEBS-CROSS-BACKBONE-PARTIAL"
     if n_confirms == 1:
-        return "PRELIMINARY-INCONCLUSIVE-CROSS-BACKBONE-1OF3"
-    return "PRELIMINARY-INCONCLUSIVE-CROSS-BACKBONE-0OF3"
+        return "TENTATIVE-INCONCLUSIVE-CROSS-BACKBONE-1OF3"
+    return "TENTATIVE-INCONCLUSIVE-CROSS-BACKBONE-0OF3"
 
 
 # ============================================================================
@@ -839,7 +835,7 @@ def parse_args():
     p.add_argument("--force-rescore", action="store_true",
                    help="Re-run Stage A even if scored parquet exists.")
     p.add_argument("--skip-backbones", default="",
-                   help="Comma-separated backbone aliases to skip (for partial dispatch).")
+                   help="Comma-separated backbone aliases to skip (for partial runs).")
     p.add_argument("--smoke", action="store_true",
                    help="Smoke-test mode: cap Stage A at --smoke-limit utterances per backbone.")
     p.add_argument("--smoke-limit", type=int, default=50)
@@ -924,14 +920,6 @@ def main():
         "min_obs_per_user": int(args.min_obs_per_user),
         "per_user_utterance_cap": int(args.per_user_utterance_cap),
         "backbones": active_backbones,
-        "skill_citations": [
-            "Skill: research-grade-code-audit-pre-launch v1 G1-G12",
-            "Skill: honest-disclosure SCOPE-not-RETRACT (4-class STRICT cross-backbone)",
-            "Skill: post-experiment-discipline-3-track Step 5+7",
-            "Skill: launch-runpod-h100-job (h100_v2_backup)",
-            "Skill: gpu-artifact-sync",
-            "Skill: icml-neurips-critical-reviewer-2026 Pass 5 cross-architecture generalization",
-        ],
         "honest_disclosure_design_notes": (
             "Q7 uses mean-response log-likelihood scoring (Stiennon et al. 2020) as a "
             "BACKBONE-AGNOSTIC RM proxy across all 3 backbones, NOT the legacy LoRA-RM "
@@ -939,7 +927,7 @@ def main():
             "architecture variance from RM-training variance. Q7 does NOT re-replicate "
             "the 8.58% legacy headline; it is a self-contained 3-arm cross-architecture "
             "comparison. Q9's pooled-4-corpus PRISM-slice gain (+9.977% with Qwen mean-LL) "
-            "is the closest internal anchor for the Qwen2.5-7B mean-LL arm. Per-user "
+            "is the closest internal reference for the Qwen2.5-7B mean-LL arm. Per-user "
             "utterance cap (20) bounds wall-time on H100 80GB nf4 while preserving K=5 "
             "CV signal (>=4 obs/fold/user)."
         ),
@@ -1020,7 +1008,7 @@ def main():
         # Stage B
         try:
             scored_df = pd.read_parquet(scored_parquet)
-            stage_b_result = stage_b_pilsd_per_user(
+            stage_b_result = stage_b_pebs_per_user(
                 scored_df,
                 backbone_alias=backbone_alias,
                 seed=args.seed,
@@ -1100,8 +1088,8 @@ def main():
             "n_users_post_filter": res.get("n_users_post_filter", 0),
             "rmse_baseline_pop": res.get("stages", {}).get("stage_b", {}).get(
                 "rmse_baseline_pop", float("nan")),
-            "rmse_pilsd_shrunk": res.get("stages", {}).get("stage_b", {}).get(
-                "rmse_pilsd_shrunk", float("nan")),
+            "rmse_pebs_shrunk": res.get("stages", {}).get("stage_b", {}).get(
+                "rmse_pebs_shrunk", float("nan")),
             "tau_alpha_sq": res.get("stages", {}).get("stage_b", {}).get(
                 "tau_alpha_sq", float("nan")),
             "tau_beta_sq": res.get("stages", {}).get("stage_b", {}).get(

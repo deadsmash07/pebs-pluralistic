@@ -1,7 +1,7 @@
-"""Per-category breakdown of the Track 1 PILSD 8.58% RMSE headline.
+"""Per-category breakdown of the Track 1 PEBS 8.58% RMSE headline.
 
 Reviewer question: "does the 8.58% hold uniformly across conversation types,
-or does PILSD help only on specific categories?"
+or does PEBS help only on specific categories?"
 
 This script re-runs the `eval_user_score_mse_shrunk.py` k=5 within-user CV
 headline on every category slice (≥50 utterances) of PRISM, using the same
@@ -23,10 +23,10 @@ Stratifiers:
 For each slice we report:
   - n_obs, n_users surviving CV
   - pop-slope RMSE (mean across users)
-  - PILSD-shrunk RMSE (mean across users)
+  - PEBS-shrunk RMSE (mean across users)
   - relative improvement (%)
-  - Wilcoxon signed-rank p (PILSD < pop one-sided)
-  - user win rate (fraction of users where PILSD beats pop-slope)
+  - Wilcoxon signed-rank p (PEBS < pop one-sided)
+  - user win rate (fraction of users where PEBS beats pop-slope)
 
 A "category" with <50 test observations OR <10 CV-surviving users is dropped.
 
@@ -140,7 +140,7 @@ def run_slice_headline(
         x = grp.rm_score.to_numpy()
         y = grp.score_user.to_numpy().astype(float)
         folds = kfold_split(n, k_folds, rng)
-        sq = {"pop_slope": [], "pilsd_shrunk": []}
+        sq = {"pop_slope": [], "pebs_shrunk": []}
         for tr, te in folds:
             if len(te) == 0:
                 continue
@@ -152,7 +152,7 @@ def run_slice_headline(
             omega_b = tau_b_sq / (tau_b_sq + Vb) if np.isfinite(Vb) else 0.0
             a_s = omega_a * a + (1 - omega_a) * pop_alpha
             b_s = omega_b * b + (1 - omega_b) * pop_beta
-            sq["pilsd_shrunk"].extend(((a_s + b_s * x_te - y_te) ** 2).tolist())
+            sq["pebs_shrunk"].extend(((a_s + b_s * x_te - y_te) ** 2).tolist())
         if len(sq["pop_slope"]) == 0:
             continue
         per_user_rows.append(
@@ -160,7 +160,7 @@ def run_slice_headline(
                 "user_id": uid,
                 "n": n,
                 "rmse_pop_slope": float(np.sqrt(np.mean(sq["pop_slope"]))),
-                "rmse_pilsd_shrunk": float(np.sqrt(np.mean(sq["pilsd_shrunk"]))),
+                "rmse_pebs_shrunk": float(np.sqrt(np.mean(sq["pebs_shrunk"]))),
             }
         )
 
@@ -169,24 +169,24 @@ def run_slice_headline(
         return {"error": "insufficient_surviving_users", "n_users": int(len(pu))}
 
     pop_mean = float(pu.rmse_pop_slope.mean())
-    sh_mean = float(pu.rmse_pilsd_shrunk.mean())
+    sh_mean = float(pu.rmse_pebs_shrunk.mean())
     rel_gain = 100.0 * (pop_mean - sh_mean) / pop_mean
     try:
         wilcox = stats.wilcoxon(
-            pu.rmse_pilsd_shrunk.to_numpy(),
+            pu.rmse_pebs_shrunk.to_numpy(),
             pu.rmse_pop_slope.to_numpy(),
             alternative="less",
         )
         wilcox_p = float(wilcox.pvalue)
     except Exception:
         wilcox_p = float("nan")
-    win_rate = float((pu.rmse_pilsd_shrunk < pu.rmse_pop_slope).mean())
+    win_rate = float((pu.rmse_pebs_shrunk < pu.rmse_pop_slope).mean())
 
     return {
         "n_obs": int(len(df)),
         "n_users": int(len(pu)),
         "mean_rmse_pop_slope": pop_mean,
-        "mean_rmse_pilsd_shrunk": sh_mean,
+        "mean_rmse_pebs_shrunk": sh_mean,
         "relative_gain_pct": float(rel_gain),
         "wilcoxon_p_shrunk_lt_pop": wilcox_p,
         "user_win_rate": win_rate,
@@ -327,7 +327,7 @@ def run_stratifier(
 
 def build_markdown(results: Dict, baseline_gain: float, wall: float) -> str:
     lines = []
-    lines.append("# Track 1 PILSD Per-Category Breakdown")
+    lines.append("# Track 1 PEBS Per-Category Breakdown")
     lines.append("")
     lines.append(
         f"_Runtime: {wall:.1f}s_   "
@@ -336,7 +336,7 @@ def build_markdown(results: Dict, baseline_gain: float, wall: float) -> str:
     lines.append("")
     lines.append(
         f"**Headline under test**: paper §4.1 reports +8.58% relative RMSE "
-        f"improvement of PILSD EB-shrinkage over population-slope baseline "
+        f"improvement of PEBS EB-shrinkage over population-slope baseline "
         f"on PRISM. Baseline re-run on full cohort: "
         f"**{baseline_gain:+.3f}%**. This document breaks the headline into "
         f"interpretable category slices."
@@ -356,7 +356,7 @@ def build_markdown(results: Dict, baseline_gain: float, wall: float) -> str:
     lines.append("")
     lines.append(
         "| stratifier | category | n_obs | n_users | pop RMSE | "
-        "PILSD RMSE | gain | Wilcoxon p | win % |"
+        "PEBS RMSE | gain | Wilcoxon p | win % |"
     )
     lines.append(
         "|---|---|---:|---:|---:|---:|---:|---:|---:|"
@@ -366,7 +366,7 @@ def build_markdown(results: Dict, baseline_gain: float, wall: float) -> str:
             f"| {r['stratifier']} | {r['category']} | "
             f"{r['n_obs']} | {r['n_users']} | "
             f"{r['mean_rmse_pop_slope']:.3f} | "
-            f"{r['mean_rmse_pilsd_shrunk']:.3f} | "
+            f"{r['mean_rmse_pebs_shrunk']:.3f} | "
             f"**{r['relative_gain_pct']:+.2f}%** | "
             f"{r['wilcoxon_p_shrunk_lt_pop']:.2e} | "
             f"{100*r['user_win_rate']:.1f}% |"
@@ -380,7 +380,7 @@ def build_markdown(results: Dict, baseline_gain: float, wall: float) -> str:
         lines.append(f"## Stratifier: `{strat}`")
         lines.append("")
         lines.append(
-            "| category | n_obs | n_users | pop RMSE | PILSD RMSE | "
+            "| category | n_obs | n_users | pop RMSE | PEBS RMSE | "
             "gain | Δ vs baseline | win % |"
         )
         lines.append(
@@ -391,7 +391,7 @@ def build_markdown(results: Dict, baseline_gain: float, wall: float) -> str:
             lines.append(
                 f"| {r['category']} | {r['n_obs']} | {r['n_users']} | "
                 f"{r['mean_rmse_pop_slope']:.3f} | "
-                f"{r['mean_rmse_pilsd_shrunk']:.3f} | "
+                f"{r['mean_rmse_pebs_shrunk']:.3f} | "
                 f"**{r['relative_gain_pct']:+.2f}%** | "
                 f"{r['delta_vs_baseline_pp']:+.2f} pp | "
                 f"{100*r['user_win_rate']:.1f}% |"
@@ -430,14 +430,14 @@ def build_markdown(results: Dict, baseline_gain: float, wall: float) -> str:
         )
         if neg_rows:
             lines.append(
-                f"- **Categories where PILSD HURTS (gain < 0)**: "
+                f"- **Categories where PEBS HURTS (gain < 0)**: "
                 + ", ".join(
                     f"`{r['stratifier']}={r['category']}` ({r['relative_gain_pct']:+.2f}%)"
                     for r in neg_rows
                 )
             )
         else:
-            lines.append("- **Categories where PILSD HURTS**: none (all gains ≥ 0).")
+            lines.append("- **Categories where PEBS HURTS**: none (all gains ≥ 0).")
         if small_rows:
             lines.append(
                 f"- **Fragile (gain < half of baseline = {baseline_gain/2:.2f}%)**: "
@@ -455,20 +455,20 @@ def build_markdown(results: Dict, baseline_gain: float, wall: float) -> str:
         lines.append("")
         if min(gains) > 0 and max(gains) - min(gains) < 0.5 * baseline_gain:
             lines.append(
-                "**Conclusion**: PILSD benefit is approximately uniform "
+                "**Conclusion**: PEBS benefit is approximately uniform "
                 "across conversation types, turn positions, model families, "
                 "and user score regimes. The 8.58% headline is not carried "
                 "by a single subgroup."
             )
         elif min(gains) > 0:
             lines.append(
-                f"**Conclusion**: PILSD is uniformly beneficial (no negative "
+                f"**Conclusion**: PEBS is uniformly beneficial (no negative "
                 f"cells) but heterogeneous in magnitude — "
                 f"strongest/weakest ratio = {ratio:.2f}×."
             )
         else:
             lines.append(
-                f"**Conclusion**: PILSD has {len(neg_rows)} category(ies) "
+                f"**Conclusion**: PEBS has {len(neg_rows)} category(ies) "
                 f"where it hurts, indicating non-uniform benefit. "
                 f"Disclosure in paper recommended."
             )

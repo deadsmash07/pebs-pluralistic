@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""iter+N+279 — Adversarial permutation null for T2 lagged-KL empirical validation.
+"""Permutation null for the lagged-KL empirical validation.
 
-ADVERSARIAL ATTACK (iter+N+278 subagent a5f098d8):
-  iter+N+269 reports Ĉ=2.05e-4, 95% paired-bootstrap CI [6.4e-5, 5.1e-4]
+CONCERN:
+  The lagged-KL empirical validation reports Ĉ=2.05e-4, 95% paired-bootstrap CI [6.4e-5, 5.1e-4]
   excludes zero on n=4 seeds. But:
     - |Δ_BT-LL| is non-negative by construction (absolute value)
     - ε̄_T = λ₀|1-β| is non-negative (|1-β| is absolute)
@@ -10,7 +10,7 @@ ADVERSARIAL ATTACK (iter+N+278 subagent a5f098d8):
       and positive CI — "CI excludes zero" is a measure-zero trivial fact
       of the degenerate design, not a test of Theorem T2.
 
-CLOSURE:
+RESOLUTION:
   (a) Permutation null: randomly permute (ε̄_T, |Δ_BT-LL|) pairings across
       the 4 seeds; for each permutation, re-run the paired-bootstrap 95%
       CI; count fraction where CI excludes zero. If this fraction is ≥50%,
@@ -65,7 +65,7 @@ def bootstrap_slope_ci(x: np.ndarray, y: np.ndarray,
 def parse_args():
     p = argparse.ArgumentParser()
     p.add_argument("--per-seed-json", required=True,
-                   help="Path to per_seed_integrals.json from iter+N+269.")
+                   help="Path to per_seed_integrals.json from the lagged-KL validation run.")
     p.add_argument("--output-json", required=True)
     p.add_argument("--n-boot", type=int, default=10_000)
     p.add_argument("--seed", type=int, default=42)
@@ -91,7 +91,7 @@ def main():
     print(f"  delta (signed)= {deltas_signed}")
     print(f"  delta (abs)   = {deltas_abs}")
 
-    # --- Observed fit (replicates iter+N+269) ---
+    # --- Observed fit (replicates the original validation fit) ---
     obs_fit = fit_no_intercept(integrals_abs, deltas_abs)
     obs_ci = bootstrap_slope_ci(integrals_abs, deltas_abs,
                                  n_boot=args.n_boot, seed=args.seed)
@@ -190,8 +190,7 @@ def main():
         )
 
     out = {
-        "iter": "iter+N+279_adv_lagged_kl_perm",
-        "attack": "NEW-2 T2 lagged-KL CI-excludes-zero is measure-zero trivial",
+        "concern": "lagged-KL CI-excludes-zero is measure-zero trivial",
         "n_seeds": n,
         "seeds": seeds,
         "inputs": {

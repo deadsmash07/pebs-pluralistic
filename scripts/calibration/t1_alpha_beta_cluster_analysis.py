@@ -1,7 +1,7 @@
 """
 T1 alpha-beta cluster analysis.
 
-Tests whether the fitted per-user (alpha_j, beta_j) calibrators from PILSD on
+Tests whether the fitted per-user (alpha_j, beta_j) calibrators from PEBS on
 PRISM come from a single Gaussian (validates hierarchical Gaussian prior), a
 mixture (suggests mixture prior future work), or a continuous but
 non-Gaussian distribution (heavy tails / skew).
@@ -288,7 +288,7 @@ def main(args):
 
 
 if __name__ == "__main__":
-    p = argparse.ArgumentParser(description="Cluster analysis of PILSD (alpha_j, beta_j)")
+    p = argparse.ArgumentParser(description="Cluster analysis of PEBS (alpha_j, beta_j)")
     p.add_argument(
         "--calibrators",
         default="data/prism_user_calibrators_shrunk.parquet",

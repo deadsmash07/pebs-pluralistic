@@ -1,4 +1,4 @@
-"""H2e + EB shrinkage arm — does partial pooling improve the main PILSD headline?
+"""H2e + EB shrinkage arm — does partial pooling improve the main PEBS headline?
 
 Last iteration's cold-start work showed EB shrinkage drops break-even k from
 20 to 5. That's at the COLD-START regime (2-20 train utterances). The main
@@ -13,10 +13,10 @@ helps at cold start only".
 Design: same as eval_user_score_mse.py but with a 4th arm:
   - no_calib: predict train-fold mean
   - pop_slope: global α₀ + β₀ · x
-  - pilsd_ols: per-user OLS on train fold (naive)
-  - pilsd_shrunk: shrinkage ω · OLS + (1-ω) · pop  (new)
+  - pebs_ols: per-user OLS on train fold (naive)
+  - pebs_shrunk: shrinkage ω · OLS + (1-ω) · pop  (new)
 
-Expected outcome: pilsd_shrunk ≤ pilsd_ols (lower or equal RMSE) at ≥95% of
+Expected outcome: pebs_shrunk ≤ pebs_ols (lower or equal RMSE) at ≥95% of
 users because shrinkage is always Pareto-dominant at finite k.
 
 References
@@ -116,7 +116,7 @@ def main():
         x = grp.rm_score.to_numpy()
         y = grp.score_user.to_numpy().astype(float)
         folds = kfold_split(n, args.k_folds, rng)
-        squared = {"no_calib": [], "pop_slope": [], "pilsd_ols": [], "pilsd_shrunk": []}
+        squared = {"no_calib": [], "pop_slope": [], "pebs_ols": [], "pebs_shrunk": []}
 
         for train_idx, test_idx in folds:
             x_tr, y_tr = x[train_idx], y[train_idx]
@@ -132,18 +132,18 @@ def main():
             y_hat_ps = pop_alpha + pop_beta * x_te
             squared["pop_slope"].extend(((y_hat_ps - y_te) ** 2).tolist())
 
-            # PILSD naive OLS
+            # PEBS naive OLS
             a, b, Va, Vb = ols_with_V(x_tr, y_tr)
             y_hat_ols = a + b * x_te
-            squared["pilsd_ols"].extend(((y_hat_ols - y_te) ** 2).tolist())
+            squared["pebs_ols"].extend(((y_hat_ols - y_te) ** 2).tolist())
 
-            # PILSD shrunk
+            # PEBS shrunk
             omega_a = tau_a_sq / (tau_a_sq + Va) if np.isfinite(Va) else 0.0
             omega_b = tau_b_sq / (tau_b_sq + Vb) if np.isfinite(Vb) else 0.0
             a_s = omega_a * a + (1 - omega_a) * pop_alpha
             b_s = omega_b * b + (1 - omega_b) * pop_beta
             y_hat_sh = a_s + b_s * x_te
-            squared["pilsd_shrunk"].extend(((y_hat_sh - y_te) ** 2).tolist())
+            squared["pebs_shrunk"].extend(((y_hat_sh - y_te) ** 2).tolist())
 
         per_user_rows.append({
             "user_id": uid,
@@ -154,7 +154,7 @@ def main():
 
     pu = pd.DataFrame(per_user_rows)
     print(f"\n=== 4-arm within-user CV ({len(pu)} users, k={args.k_folds}) ===")
-    for arm in ["rmse_no_calib", "rmse_pop_slope", "rmse_pilsd_ols", "rmse_pilsd_shrunk"]:
+    for arm in ["rmse_no_calib", "rmse_pop_slope", "rmse_pebs_ols", "rmse_pebs_shrunk"]:
         print(f"  {arm}: mean={pu[arm].mean():.3f}  median={pu[arm].median():.3f}")
 
     # Paired comparisons
@@ -168,9 +168,9 @@ def main():
         }
 
     comparisons = {
-        "shrunk_vs_ols":        paired("rmse_pilsd_shrunk", "rmse_pilsd_ols"),
-        "shrunk_vs_pop":        paired("rmse_pilsd_shrunk", "rmse_pop_slope"),
-        "ols_vs_pop":           paired("rmse_pilsd_ols", "rmse_pop_slope"),
+        "shrunk_vs_ols":        paired("rmse_pebs_shrunk", "rmse_pebs_ols"),
+        "shrunk_vs_pop":        paired("rmse_pebs_shrunk", "rmse_pop_slope"),
+        "ols_vs_pop":           paired("rmse_pebs_ols", "rmse_pop_slope"),
     }
     print(f"\n=== Paired comparisons ===")
     for name, d in comparisons.items():
@@ -178,11 +178,11 @@ def main():
               f"{name.split('_vs_')[0]} wins {d['frac_a_smaller']:.1%}  "
               f"Wilcoxon p={d['wilcoxon_p']:.3e}")
 
-    rel_improvement = 100 * (pu.rmse_pop_slope.mean() - pu.rmse_pilsd_shrunk.mean()) / pu.rmse_pop_slope.mean()
-    rel_ols = 100 * (pu.rmse_pop_slope.mean() - pu.rmse_pilsd_ols.mean()) / pu.rmse_pop_slope.mean()
+    rel_improvement = 100 * (pu.rmse_pop_slope.mean() - pu.rmse_pebs_shrunk.mean()) / pu.rmse_pop_slope.mean()
+    rel_ols = 100 * (pu.rmse_pop_slope.mean() - pu.rmse_pebs_ols.mean()) / pu.rmse_pop_slope.mean()
     print(f"\n=== Relative improvement vs pop-slope ===")
-    print(f"  PILSD naive OLS: {rel_ols:+.2f}%")
-    print(f"  PILSD shrunk:    {rel_improvement:+.2f}%")
+    print(f"  PEBS naive OLS: {rel_ols:+.2f}%")
+    print(f"  PEBS shrunk:    {rel_improvement:+.2f}%")
     print(f"  Shrunk gain over naive: {rel_improvement - rel_ols:+.3f} pp")
 
     out = {
@@ -192,9 +192,9 @@ def main():
                "sigma_alpha": float(np.sqrt(tau_a_sq)),
                "sigma_beta": float(np.sqrt(tau_b_sq))},
         "rmse_mean": {arm: float(pu[f"rmse_{arm}"].mean())
-                      for arm in ["no_calib", "pop_slope", "pilsd_ols", "pilsd_shrunk"]},
+                      for arm in ["no_calib", "pop_slope", "pebs_ols", "pebs_shrunk"]},
         "rmse_median": {arm: float(pu[f"rmse_{arm}"].median())
-                        for arm in ["no_calib", "pop_slope", "pilsd_ols", "pilsd_shrunk"]},
+                        for arm in ["no_calib", "pop_slope", "pebs_ols", "pebs_shrunk"]},
         "comparisons": comparisons,
         "relative_improvement_vs_pop_pct": {
             "naive_ols": float(rel_ols),
